@@ -16,16 +16,6 @@ library(purrr)
 library(openxlsx)
 library(readr)
 library(polyglotr)
-# 26. July: 14:15-16:15, tried to sort out labeling
-
-# 28. July: 17:00-19:32 found sources, worked on labeling
-# 29. July: 14:30-13:00
-# 30. July: 12:15-12:30
-# 31. July: 12:00-13:30; 14:10-18:40
-# 01. August: 12:00-13:45, 01:30-02:00
-# 02. August: 11:30-13:15; 14:30-16:45
-
-# 04. August: 12:00-17:00
 
 ##############################################################
 # ADM1 Labeling

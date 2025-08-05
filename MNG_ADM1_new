@@ -1,0 +1,1708 @@
+##############################################################
+# Mongolia - MNG
+#
+# New code format to improve readability. Before running code, 
+# be sure to load functions (written at the bottom of the code)
+##############################################################
+
+setwd("D:/Kien Work/ProfSchneiderRASP25-SU25")
+rm(list = ls())
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(purrr)
+library(openxlsx)
+library(readr)
+library(polyglotr)
+# 26. July: 14:15-16:15, tried to sort out labeling
+
+# 28. July: 17:00-19:32 found sources, worked on labeling
+# 29. July: 14:30-13:00
+# 30. July: 12:15-12:30
+# 31. July: 12:00-13:30; 14:10-18:40
+# 01. August: 12:00-13:45, 01:30-02:00
+# 02. August: 11:30-13:15; 14:30-16:45
+
+# 04. August: 12:00-17:00
+
+##############################################################
+# ADM1 Labeling
+#
+# Data inconsistently names ADM1 regions. Prepare data for 
+# processing by applying ADM1 names consistent with GADM_ADM1
+##############################################################
+
+
+
+
+# CLEA
+CLEA <- load("D:/Kien Work/ProfSchneiderRASP25-SU25/clea_lc_20240419_r/clea_lc_20240419_r/clea_lc_20240419.RData")
+CLEA <- clea_lc_20240419
+rm(clea_lc_20240419)
+
+CLEA_MNG_RAW <- CLEA %>% 
+  filter (ctr_n == "Mongolia", yr >= 1996) %>%
+  select (yr, mn, ctr_n, sub, cst_n, cst, pty_n, vv1, pv1) %>%
+  filter(pv1 >= 0, vv1 >= 0)
+
+# Load in district names with map to ADM1 region
+translate <- read_excel("translated_mongolian_names.xlsx")
+
+# Label CLEA and manual data with ADM1 district
+CLEA_MNG <- formatCLEAData(CLEA_MNG_RAW, translate)
+manual_MNG <- formatManualData(read_excel("MNG_processed_manual_data.xlsx"), translate)
+
+rm(CLEA_MNG_RAW)
+
+
+
+
+##############################################################
+# Election Analysis
+#
+# Process election results and format election data for final
+# submission
+##############################################################
+
+
+
+
+# Elections in 1990, 1992, 1996, 2000, 2004, 2008, 2012, 2016, 2020, 2024
+parliamentElectionYears <- rbind(
+  data.frame(yr = 1990, mn = 7, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 1992, mn = 6, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 1996, mn = 6, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 2000, mn = 7, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 2004, mn = 6, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 2008, mn = 6, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 2012, mn = 6, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 2016, mn = 6, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 2020, mn = 6, haveData = 0, exe_leg = "leg"),
+  data.frame(yr = 2024, mn = 6, haveData = 0, exe_leg = "leg")
+)
+
+# Elections in 1993, 1997, 2001, 2005, 2009, 2013, 2017 (two rounds), 2021
+presidentElectionYears <- rbind(
+  data.frame(yr = 1993, mn = 6, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 1997, mn = 5, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 2001, mn = 5, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 2005, mn = 5, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 2009, mn = 5, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 2013, mn = 6, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 2017, mn = 6, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 2017, mn = 7, haveData = 0, exe_leg = "exe"),
+  data.frame(yr = 2021, mn = 6, haveData = 0, exe_leg = "exe")
+)
+
+
+
+
+# Parliamentary (State Great Khural) elections
+################################################################################
+# 1990 incumbent: "MPRP", winner: "MPRP"
+
+# First democratic elections. Incumbent MPRP won super-majority of seats. 
+# No available data.
+
+################################################################################
+# 1992 incumbent: "MPRP", winner: "MPRP"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("MPRP" # MPRP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Revolutionary Party"
+noteToAdd <- "State Great Khural (Parliament)"
+exeOrLeg <- "leg"
+countryCode <- "MNG"
+thisYear <- 1992
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+# Get source
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct() %>%
+  mutate(
+    vote_share_incumbent = party_percentage,
+  )
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 0) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_1992_Parliament <- curr
+
+parliamentElectionYears[2, 3] <- 1 # this election has data
+
+################################################################################
+# 1996 incumbent: "MPRP", winner: "Democratic Union Coalition (DUC)"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("MPRP" # MPRP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Revolutionary Party (MPRP)"
+noteToAdd <- "State Great Khural (Parliament)"
+exeOrLeg <- "leg"
+countryCode <- "MNG"
+thisYear <- 1996
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+# Get source
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct() %>%
+  mutate(
+    vote_share_incumbent = party_percentage,
+  )
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 0) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_1996_Parliament <- curr
+
+parliamentElectionYears[3, 3] <- 1 # this election has data
+
+################################################################################
+# 2000 incumbent: "Democratic Union Coalition (DUC)", winner: "MPRP"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("DU" # Democratic Union Coalition
+                ) # Old Ruling Party
+incumbentPartyName <- "Democratic Union Coalition"
+noteToAdd <- "State Great Khural (Parliament)"
+exeOrLeg <- "leg"
+countryCode <- "MNG"
+thisYear <- 2000
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+# Get source
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct() %>%
+  mutate(
+    vote_share_incumbent = party_percentage,
+  )
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 0) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2000_Parliament <- curr
+
+parliamentElectionYears[4, 3] <- 1 # this election has data
+
+################################################################################
+# 2004 incumbent: "MPRP", winner: "MPRP"
+
+# No data
+
+################################################################################
+# 2008 incumbent: "MPRP", winner: "MPRP"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Mongolian People's Revolutionary Party" # MPRP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Revolutionary Party (MPRP)"
+noteToAdd <- "State Great Khural (Parliament)"
+exeOrLeg <- "leg"
+countryCode <- "MNG"
+thisYear <- 2008
+
+curr <- CLEA_MNG %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+sourceUsed <- "https://electiondataarchive.org/"
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 0) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2008_parliament <- curr
+
+# For some reason, some data is strangely formatted with more votes for a party
+# than valid votes. Keep results where vote_share_incumbent <= 100 only
+MNG_2008_parliament <- MNG_2008_parliament %>%
+  filter(vote_share_incumbent <= 100)
+
+parliamentElectionYears[6, 3] <- 1 # this election has data
+
+################################################################################
+# 2012 incumbent: "Mongolian People's Party (MPP)", winner: "Democratic Party Coalition"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Mongolian People's Party" # MPP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Party (MPP)"
+noteToAdd <- "State Great Khural (Parliament)"
+exeOrLeg <- "leg"
+countryCode <- "MNG"
+thisYear <- 2012
+
+curr <- CLEA_MNG %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+sourceUsed <- "https://electiondataarchive.org/"
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 0) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2012_parliament <- curr
+
+# For some reason, some data is strangely formatted with more votes for a party
+# than valid votes. Keep results where vote_share_incumbent <= 100 only
+MNG_2012_parliament <- MNG_2012_parliament %>%
+  filter(vote_share_incumbent <= 100)
+
+parliamentElectionYears[7, 3] <- 1 # this election has data
+
+################################################################################
+# 2016 incumbent: "Democratic Party Coalition", winner: "Mongolian People's Party (MPP)"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Democratic Party", # DP
+                "Civil Will–Green Party", # CWGP
+                "Mongolian People's Revolutionary Party" # Part of Justice Coalition
+                ) # Old Ruling Party
+incumbentPartyName <- "Democratic Party Coalition"
+noteToAdd <- "State Great Khural (Parliament)"
+exeOrLeg <- "leg"
+countryCode <- "MNG"
+thisYear <- 2016
+
+curr <- CLEA_MNG %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+sourceUsed <- "https://electiondataarchive.org/"
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 0) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2016_parliament <- curr
+
+parliamentElectionYears[8, 3] <- 1 # this election has data
+
+################################################################################
+# 2020 incumbent: "Mongolian People's Party (MPP)", winner: "Mongolian People's Party (MPP)"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Mongolian People's Party" # MPP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Party (MPP)"
+noteToAdd <- "State Great Khural (Parliament)"
+exeOrLeg <- "leg"
+countryCode <- "MNG"
+thisYear <- 2020
+
+curr <- CLEA_MNG %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+sourceUsed <- "https://electiondataarchive.org/"
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 0) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2020_parliament <- curr
+
+parliamentElectionYears[9, 3] <- 1 # this election has data
+
+################################################################################
+# 2024 incumbent: "Mongolian People's Party (MPP)", winner: "Mongolian People's Party (MPP)"
+
+# No data. Constitutional reform, so parliament increased seats from 76 to 126
+
+# Presidential elections
+################################################################################
+# 1993 incumbent: "MPRP", winner: "MSDP-MNDP"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Tudev" # MPRP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Revolutionary Party (MPRP)"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 1993
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_1993_president <- curr
+
+presidentElectionYears[1, 3] <- 1 # this election has data
+
+################################################################################
+# 1997 incumbent: "Democratic Union", winner: "MPRP"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Ochirbat" # Democratic Union
+                ) # Old Ruling Party
+incumbentPartyName <- "Democratic Union"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 1997
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_1997_president <- curr
+
+presidentElectionYears[2, 3] <- 1 # this election has data
+
+################################################################################
+# 2001 incumbent: "MPRP", winner: "MPRP"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Bagabandi" # MPRP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Revolutionary Party (MPRP)"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 2001
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2001_president <- curr
+
+presidentElectionYears[3, 3] <- 1 # this election has data
+
+################################################################################
+# 2005 incumbent: "MPRP", winner: "MPRP"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("N. Enkhbayar" # MPRP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Revolutionary Party (MPRP)"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 2005
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2005_president <- curr
+
+presidentElectionYears[4, 3] <- 1 # this election has data
+
+################################################################################
+# 2009 incumbent: "MPRP", winner: "Democratic Party"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("N. Enkhbayar" # MPRP
+                ) # Old Ruling Party
+incumbentPartyName <- "Mongolian People's Revolutionary Party (MPRP)"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 2009
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2009_president <- curr
+
+presidentElectionYears[5, 3] <- 1 # this election has data
+
+################################################################################
+# 2013 incumbent: "Democratic Party", winner: "Democratic Party"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Ts. Elbegdorj" # Democratic Party
+                ) # Old Ruling Party
+incumbentPartyName <- "Democratic Party"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 2013
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2013_president <- curr
+
+presidentElectionYears[6, 3] <- 1 # this election has data
+
+################################################################################
+# 2017r1 incumbent: "Democratic Party", winner: "Democratic Party"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Kh. Battulga" # Democratic Party
+                ) # Old Ruling Party
+incumbentPartyName <- "Democratic Party"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 2017
+
+curr <- manual_MNG %>%
+  filter(year == thisYear, month == 6) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2017r1_president <- curr
+
+presidentElectionYears[7, 3] <- 1 # this election has data
+
+################################################################################
+# 2017r2 incumbent: "Democratic Party", winner: "Democratic Party"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Kh. Battulga" # Democratic Party
+                ) # Old Ruling Party
+incumbentPartyName <- "Democratic Party"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 2017
+
+curr <- manual_MNG %>%
+  filter(year == thisYear, month == 7) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n, vote_share_incumbent = party_percentage) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 2) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2017r2_president <- curr
+
+presidentElectionYears[8, 3] <- 1 # this election has data
+
+################################################################################
+# 2021 incumbent: "Democratic Party", winner: "MPP"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Democratic" # Democratic Party
+                ) # Old Ruling Party
+incumbentPartyName <- "Democratic Party"
+noteToAdd <- "President"
+exeOrLeg <- "exe"
+countryCode <- "MNG"
+thisYear <- 2021
+
+curr <- manual_MNG %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+sourceUsed <- curr$source[1]
+
+# total_votes (sum total_votes once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, translatedRegion, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = subNat, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = 1) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+MNG_2021_president <- curr
+
+presidentElectionYears[9, 3] <- 1 # this election has data
+
+
+
+
+##############################################################
+# Aggregate Final Results
+# 
+# Process and collate all results into one file to submit
+##############################################################
+
+
+
+
+# create final database for parliamentary elections
+mongoliaSubnational <- read_excel("GADM_ADM1.xlsx") %>% 
+  filter(NAME_0 == "Mongolia") %>%
+  select(NAME_0, GID_0, NAME_1, GID_1)
+
+src <- "Varied"
+nt <- "State Great Khural (Parliament)"
+
+dataList <- list(MNG_1992_Parliament,
+                 MNG_1996_Parliament,
+                 MNG_2000_Parliament,
+                 MNG_2008_parliament,
+                 MNG_2012_parliament,
+                 MNG_2016_parliament,
+                 MNG_2020_parliament)
+
+noDataYears <- createEmptyYears(parliamentElectionYears, mongoliaSubnational, src, nt)
+filledDataYears <- fillEmpty(dataList, mongoliaSubnational) %>%
+  mutate(NAME_1 = as.character(NAME_1))
+
+finalLeg <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1) %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+# create final database for presidential elections
+src <- "Varied"
+nt <- "President"
+
+dataList <- list(MNG_1993_president,
+                 MNG_1997_president,
+                 MNG_2001_president,
+                 MNG_2005_president,
+                 MNG_2009_president,
+                 MNG_2013_president,
+                 MNG_2017r1_president,
+                 MNG_2017r2_president,
+                 MNG_2021_president)
+
+noDataYears <- createEmptyYears(presidentElectionYears, mongoliaSubnational, src, nt)
+filledDataYears <- fillEmpty(dataList, mongoliaSubnational) %>%
+  mutate(NAME_1 = as.character(NAME_1))
+
+finalExec <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1) %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+
+# Final amalgamated database
+final <- rbind(finalLeg, finalExec) 
+
+# Add GID_1 labels
+GID_1_labels <- mongoliaSubnational %>%
+  select(NAME_1, GID_1)
+
+final <- final %>%
+  left_join(GID_1_labels, by = "NAME_1") %>%
+  select(NAME_0, GID_0, NAME_1, GID_1, year, month, exe_leg, round, 
+         incumbent_party, vote_share_incumbent, party_turnover, source, note) %>%
+  arrange(year, month, NAME_1)
+
+
+# get file
+write.xlsx(final, "MNG_adm1_new.xlsx", colnames = TRUE, rownames = FALSE)
+
+
+
+
+##############################################################
+# Data Pre-processing
+#
+# Prepares manual data and creates mapping of labeled districts
+# to ADM1 regions
+##############################################################
+
+
+
+
+# Code used to clean up data extracted from various sources
+base1 <- data.frame()
+manual1992 <- read_excel("MNG_rawdata.xlsx", sheet = "1992_leg")
+pointer <- manual1992
+
+for (i in 1:nrow(pointer)){
+  district <- as.character(pointer[i, 3])
+  src <- "\"Elections in Asia and the Pacific: A Data Handbook: Volume II\", Dieter Nohlen, pg. 503"
+    
+  for (j in 4:8){
+    party <- as.character(colnames(pointer)[j])
+    party_perc <- as.numeric(pointer[i, j])
+    
+    df <- data.frame(country = "Mongolia",
+                     district_n = district, year = 1992, month = 06,
+                     exe_leg = "leg", party_n = party, round = 0,
+                     party_votes = NA, total_votes = NA,
+                     party_percentage = party_perc, source = src)
+    
+    base1 <- rbind(base1, df)
+    
+  }
+  
+}
+
+
+
+base2 <- data.frame()
+manual1993 <- read_excel("MNG_rawdata.xlsx", sheet = "1993_exe") %>%
+  filter(!`1993 Region`=="Total")
+pointer <- manual1993
+pointer$Source[1]
+
+for (i in 1:nrow(pointer)){
+  district <- as.character(pointer[i, 3])
+  src <- "\"Elections in Asia and the Pacific: A Data Handbook: Volume II\", Dieter Nohlen, pg. 515"
+  
+  for (j in 4:5){
+    party <- as.character(colnames(pointer)[j])
+    party_perc <- as.numeric(pointer[i, j])
+    
+    df <- data.frame(country = "Mongolia",
+                     district_n = district, year = 1993, month = 06,
+                     exe_leg = "exe", party_n = party, round = 1,
+                     party_votes = NA, total_votes = NA,
+                     party_percentage = party_perc, source = src)
+    
+    base2 <- rbind(base2, df)
+    
+  }
+  
+}
+
+
+
+base3 <- data.frame()
+manual1996 <- read_excel("MNG_rawdata.xlsx", sheet = "1996_leg") %>%
+  filter(!`1996 Region`=="Nation-wide")
+pointer <- manual1996
+pointer$Source[1]
+
+for (i in 1:nrow(pointer)){
+  district <- as.character(pointer[i, 3])
+  src <- "\"Elections in Asia and the Pacific: A Data Handbook: Volume II\", Dieter Nohlen, pg. 503-504"
+  
+  for (j in 4:9){
+    party <- as.character(colnames(pointer)[j])
+    party_perc <- as.numeric(pointer[i, j])
+    
+    df <- data.frame(country = "Mongolia",
+                     district_n = district, year = 1996, month = 06,
+                     exe_leg = "leg", party_n = party, round = 0,
+                     party_votes = NA, total_votes = NA,
+                     party_percentage = party_perc, source = src)
+    
+    base3 <- rbind(base3, df)
+    
+  }
+  
+}
+
+
+
+base4 <- data.frame()
+manual1997 <- read_excel("MNG_rawdata.xlsx", sheet = "1997_exe") %>%
+  filter(!`1997 Region`=="Total")
+pointer <- manual1997
+pointer$Source[1]
+
+for (i in 1:nrow(pointer)){
+  district <- as.character(pointer[i, 3])
+  src <- "\"Elections in Asia and the Pacific: A Data Handbook: Volume II\", Dieter Nohlen, pg. 516"
+  
+  for (j in 4:6){
+    party <- as.character(colnames(pointer)[j])
+    party_perc <- as.numeric(pointer[i, j])
+    
+    df <- data.frame(country = "Mongolia",
+                     district_n = district, year = 1997, month = 05,
+                     exe_leg = "exe", party_n = party, round = 1,
+                     party_votes = NA, total_votes = NA,
+                     party_percentage = party_perc, source = src)
+    
+    base4 <- rbind(base4, df)
+    
+  }
+  
+}
+
+
+
+base5 <- data.frame()
+manual2000 <- read_excel("MNG_rawdata.xlsx", sheet = "2000_leg") %>%
+  filter(!`2000 Region`=="Nation-wide")
+pointer <- manual2000
+pointer$Source[1]
+
+for (i in 1:nrow(pointer)){
+  district <- as.character(pointer[i, 3])
+  src <- "\"Elections in Asia and the Pacific: A Data Handbook: Volume II\", Dieter Nohlen, pg. 504"
+  
+  for (j in 4:10){
+    party <- as.character(colnames(pointer)[j])
+    party_perc <- as.numeric(pointer[i, j])
+    
+    df <- data.frame(country = "Mongolia",
+                     district_n = district, year = 2000, month = 07,
+                     exe_leg = "leg", party_n = party, round = 0,
+                     party_votes = NA, total_votes = NA,
+                     party_percentage = party_perc, source = src)
+    
+    base5 <- rbind(base5, df)
+    
+  }
+  
+}
+
+
+
+base6 <- data.frame()
+manual2001 <- read_excel("MNG_rawdata.xlsx", sheet = "2001_exe") %>%
+  filter(!`2001 Region`=="Total")
+pointer <- manual2001
+pointer$Source[1]
+
+for (i in 1:nrow(pointer)){
+  district <- as.character(pointer[i, 3])
+  src <- "\"Elections in Asia and the Pacific: A Data Handbook: Volume II\", Dieter Nohlen, pg. 517"
+  
+  for (j in 4:6){
+    party <- as.character(colnames(pointer)[j])
+    party_perc <- as.numeric(pointer[i, j])
+    
+    df <- data.frame(country = "Mongolia",
+                     district_n = district, year = 2001, month = 05,
+                     exe_leg = "exe", party_n = party, round = 1,
+                     party_votes = NA, total_votes = NA,
+                     party_percentage = party_perc, source = src)
+    
+    base6 <- rbind(base6, df)
+    
+  }
+  
+}
+
+
+
+manual2005 <- read_excel("MNG_rawdata.xlsx", sheet = "prep_2005_exe") %>%
+  filter(!`Candidate`=="Empty Ballots", !`District`=="ДҮН") %>% # ДҮН is summary of all votes
+  arrange(Region, Candidate)
+pointer <- manual2005
+src <- pointer$Source[1]
+
+regionVoteTotals <- pointer %>%
+  distinct(Region, District, .keep_all = TRUE) %>%
+  group_by(Region) %>%
+  summarize(total_region_votes = sum(`Ballots Cast`, na.rm = TRUE))
+
+base7 <- pointer %>%
+  group_by(Region, Candidate) %>%
+  summarise(total_candidate_votes = sum(Votes, na.rm = TRUE)) %>%
+  left_join(regionVoteTotals, by = "Region") %>%
+  mutate(
+    country = "Mongolia", district_n = Region, year = 2005, month = 05,
+    exe_leg = "exe", party_n = Candidate, round = 1, 
+    party_votes = total_candidate_votes, total_votes = total_region_votes,
+    party_percentage = 100*total_candidate_votes/total_region_votes,
+    source = src
+  ) %>%
+  ungroup() %>%
+  select(country, district_n, year, month, exe_leg, party_n, round,
+         party_votes, total_votes, party_percentage, source) 
+
+
+
+manual2009 <- read_excel("MNG_rawdata.xlsx", sheet = "prep_2009_exe") %>% 
+  filter(!`Candidate`=="Empty Ballots", !`District`=="Ä¯Í") %>%
+  arrange(Region, Candidate)
+pointer <- manual2009
+src <- pointer$Source[1]
+
+regionVoteTotals <- pointer %>%
+  distinct(Region, District, .keep_all = TRUE) %>%
+  group_by(Region) %>%
+  summarize(total_region_votes = sum(`Ballots Cast`, na.rm = TRUE))
+
+base8 <- pointer %>%
+  group_by(Region, Candidate) %>%
+  summarise(total_candidate_votes = sum(Votes, na.rm = TRUE)) %>%
+  left_join(regionVoteTotals, by = "Region") %>%
+  mutate(
+    country = "Mongolia", district_n = Region, year = 2009, month = 05,
+    exe_leg = "exe", party_n = Candidate, round = 1, 
+    party_votes = total_candidate_votes, total_votes = total_region_votes,
+    party_percentage = 100*total_candidate_votes/total_region_votes,
+    source = src
+  ) %>%
+  ungroup() %>%
+  select(country, district_n, year, month, exe_leg, party_n, round,
+         party_votes, total_votes, party_percentage, source) 
+
+
+
+manual2013 <- read_excel("MNG_rawdata.xlsx", sheet = "prep_2013_exe") %>% 
+  arrange(Region, Candidate)
+pointer <- manual2013
+src <- pointer$Source[1]
+
+regionVoteTotals <- pointer %>%
+  distinct(Region, District, .keep_all = TRUE) %>%
+  group_by(Region) %>%
+  summarize(total_region_votes = sum(`Ballots Cast`, na.rm = TRUE))
+
+base9 <- pointer %>%
+  group_by(Region, Candidate) %>%
+  summarise(total_candidate_votes = sum(Votes, na.rm = TRUE)) %>%
+  left_join(regionVoteTotals, by = "Region") %>%
+  mutate(
+    country = "Mongolia", district_n = Region, year = 2013, month = 06,
+    exe_leg = "exe", party_n = Candidate, round = 1, 
+    party_votes = total_candidate_votes, total_votes = total_region_votes,
+    party_percentage = 100*total_candidate_votes/total_region_votes,
+    source = src
+  ) %>%
+  ungroup() %>%
+  select(country, district_n, year, month, exe_leg, party_n, round,
+         party_votes, total_votes, party_percentage, source) 
+
+
+
+manual2017r1 <- read_excel("MNG_rawdata.xlsx", sheet = "prep_2017r1_exe") %>% 
+  arrange(Region, Candidate)
+pointer <- manual2017r1
+src <- pointer$Source[1]
+
+regionVoteTotals <- pointer %>%
+  distinct(Region, District, .keep_all = TRUE) %>%
+  group_by(Region) %>%
+  summarize(total_region_votes = sum(`Ballots Cast`, na.rm = TRUE))
+
+base10 <- pointer %>%
+  group_by(Region, Candidate) %>%
+  summarise(total_candidate_votes = sum(Votes, na.rm = TRUE)) %>%
+  left_join(regionVoteTotals, by = "Region") %>%
+  mutate(
+    country = "Mongolia", district_n = Region, year = 2017, month = 06,
+    exe_leg = "exe", party_n = Candidate, round = 1, 
+    party_votes = total_candidate_votes, total_votes = total_region_votes,
+    party_percentage = 100*total_candidate_votes/total_region_votes,
+    source = src
+  ) %>%
+  ungroup() %>%
+  select(country, district_n, year, month, exe_leg, party_n, round,
+         party_votes, total_votes, party_percentage, source) 
+
+
+
+manual2017r2 <- read_excel("MNG_rawdata.xlsx", sheet = "prep_2017r2_exe") %>% 
+  arrange(Region, Candidate)
+pointer <- manual2017r2
+src <- pointer$Source[1]
+
+regionVoteTotals <- pointer %>%
+  distinct(Region, District, .keep_all = TRUE) %>%
+  group_by(Region) %>%
+  summarize(total_region_votes = sum(`Ballots Cast`, na.rm = TRUE))
+
+base11 <- pointer %>%
+  group_by(Region, Candidate) %>%
+  summarise(total_candidate_votes = sum(Votes, na.rm = TRUE)) %>%
+  left_join(regionVoteTotals, by = "Region") %>%
+  mutate(
+    country = "Mongolia", district_n = Region, year = 2017, month = 07,
+    exe_leg = "exe", party_n = Candidate, round = 2, 
+    party_votes = total_candidate_votes, total_votes = total_region_votes,
+    party_percentage = 100*total_candidate_votes/total_region_votes,
+    source = src
+  ) %>%
+  ungroup() %>%
+  select(country, district_n, year, month, exe_leg, party_n, round,
+         party_votes, total_votes, party_percentage, source)  
+
+
+
+manual2021 <- read_excel("MNG_rawdata.xlsx", sheet = "prep_2021_exe") 
+pointer <- manual2021
+src <- pointer$Source[1]
+
+regionVoteTotals <- pointer %>%
+  group_by(Region) %>%
+  summarize(total_region_votes = sum(`Number of votes cast`, na.rm = TRUE))
+
+candidateRegionVotes <- pointer %>%
+  group_by(Region) %>% 
+  summarise(total_MPP_votes = sum(`Ukhnaagiin KHURELSUKH (MANP)`, na.rm = TRUE),
+            total_RPEC_votes = sum(`Dangasuren's National Institute of Public Health (NIPH)`, na.rm = TRUE),
+            total_Democratic_votes = sum(`Sodnomzunduyin ERDENE (AP)`, na.rm = TRUE)) %>%
+  left_join(regionVoteTotals, by = "Region") 
+
+base12 <- data.frame()
+
+for (i in 1:nrow(candidateRegionVotes)){
+  district <- as.character(candidateRegionVotes[i, 1])
+  
+  # Create MPP Candidate
+  party <- "MPP"
+  party_perc <- as.numeric(candidateRegionVotes[i, 2]*100/candidateRegionVotes[i,5])
+  
+  df <- data.frame(country = "Mongolia",
+                   district_n = district, year = 2021, month = 06,
+                   exe_leg = "exe", party_n = party, round = 1,
+                   party_votes = as.numeric(candidateRegionVotes[i, 2]), total_votes = as.numeric(candidateRegionVotes[i,5]),
+                   party_percentage = party_perc, source = src)
+  
+  base12 <- rbind(base12, df)
+  
+  
+  # Create RPEC Candidate
+  party <- "RPEC"
+  party_perc <- as.numeric(candidateRegionVotes[i, 3]*100/candidateRegionVotes[i,5])
+  
+  df <- data.frame(country = "Mongolia",
+                   district_n = district, year = 2021, month = 06,
+                   exe_leg = "exe", party_n = party, round = 1,
+                   party_votes = as.numeric(candidateRegionVotes[i, 3]), total_votes = as.numeric(candidateRegionVotes[i,5]),
+                   party_percentage = party_perc, source = src)
+  
+  base12 <- rbind(base12, df)
+  
+  
+  # Create Democratic Candidate
+  party <- "Democratic"
+  party_perc <- as.numeric(candidateRegionVotes[i, 4]*100/candidateRegionVotes[i,5])
+  
+  df <- data.frame(country = "Mongolia",
+                   district_n = district, year = 2021, month = 06,
+                   exe_leg = "exe", party_n = party, round = 1,
+                   party_votes = as.numeric(candidateRegionVotes[i, 4]), total_votes = as.numeric(candidateRegionVotes[i,5]),
+                   party_percentage = party_perc, source = src)
+  
+  base12 <- rbind(base12, df)
+}
+
+
+
+finalManualBase <- rbind(base1, base2, base3, base4, base5, base6, base7,
+                         base8, base9, base10, base11, base12)
+
+# get file
+write.xlsx(finalManualBase, "MNG_processed_manual_data.xlsx", colnames = TRUE, rownames = FALSE)
+
+
+
+# Code used to obtain mapping of labeled districts to ADM1 Regions
+CLEA_MNG_RAW <- CLEA %>% 
+  filter (ctr_n == "Mongolia", yr >= 1996) %>%
+  select (yr, mn, ctr_n, sub, cst_n, cst, pty_n, vv1, pv1)
+
+# Manual data
+manual_MNG_RAW <- read_excel("MNG_processed_manual_data.xlsx")
+  
+# 2008-2012 CLEA
+batch_2 <- CLEA_MNG_RAW %>% 
+  filter (yr >= 2008, yr <= 2012)
+table(batch_2$cst_n)
+# ADM1 labeled in English
+
+# 2016 CLEA
+batch_3 <- CLEA_MNG_RAW %>%
+  filter (yr == 2016)
+table(batch_3$sub)
+# ADM1 labeled in Mongolian
+
+# 2020 CLEA
+batch_4 <- CLEA_MNG_RAW %>%
+  filter (yr == 2020)
+table(batch_4$cst_n)
+# ADM1 labeled in Mongolian
+
+# Translate district names if in Mongolian
+leftToTranslate1 <- batch_3 %>%
+  distinct(sub) %>%
+  mutate(
+    original = sub, 
+    translatedRegion = NA
+  ) %>%
+  select(original, translatedRegion)
+
+leftToTranslate2 <- batch_4 %>%
+  distinct(cst_n) %>%
+  mutate(
+    original = cst_n, 
+    translatedRegion = NA
+  ) %>%
+  select(original, translatedRegion)
+
+leftToTranslate3 <- manual_MNG_RAW %>%
+  distinct(district_n) %>%
+  mutate(
+    original = district_n, 
+    translatedRegion = NA
+  ) %>%
+  select(original, translatedRegion)
+for (i in 1:29){
+  leftToTranslate3$translatedRegion[i] = leftToTranslate3$original[i]
+}
+
+leftToTranslate4 <- batch_2 %>%
+  distinct(cst_n) %>%
+  mutate(
+    original = cst_n, 
+    translatedRegion = NA
+  ) %>%
+  select(original, translatedRegion)
+for (i in 1:26){
+  leftToTranslate4$translatedRegion[i] = leftToTranslate4$original[i]
+}
+
+translate <- rbind(leftToTranslate1, leftToTranslate2, leftToTranslate3, leftToTranslate4)
+
+for (i in 1:nrow(translate)){
+  if (is.na(translate$translatedRegion[i])){
+    translate$translatedRegion[i] = mymemory_translate(translate$original[i], target_language = "en", source_language = "mn")
+  }
+}
+
+# Create subNat variable
+translate$subNat <- NA
+
+translate <- labelMongolianProvinces(translate, mongoliaSubnational) %>%
+  distinct()
+
+write.xlsx(translate, "translated_mongolian_names.xlsx", colnames = TRUE, rownames = FALSE)
+
+
+
+
+##############################################################
+# Core Functions
+#
+# Functions used to label ADM1 regions and format data. 
+##############################################################
+
+
+
+
+# Code used to label province identities
+labelMongolianProvinces <- function(translatedList, subNatMapping){
+  
+  # Try mapping with subNatMapping first
+  for (i in 1:nrow(translatedList)){
+    for (j in 1:nrow(subNatMapping))
+      if (is.na(translatedList[i, 3])){
+        if ((grepl(subNatMapping[j, 3], translatedList[i, 2], fixed = FALSE))){
+          translatedList[i, 3] <- as.character(subNatMapping[j, 3])
+        }
+      }
+  }
+  
+  # Manual Corrections for Rest of Data
+  for (i in 1:nrow(translatedList)){
+    if (is.na(translatedList[i, 3])){ # Only if the region has not been labeled yet
+      candidate <- as.character(translatedList[i, 2])
+      
+      # Unclear affiliations
+      if (grepl("Chengdu Chengdu", candidate, ignore.case = TRUE) ||
+          grepl("Total", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "UNCLEAR AFFILIATION"
+      }
+      
+      # Chengdu Chengdu is a translation of election. Unclear.
+      # Total has unclear affiliation
+      
+      # Label Sukhbaatar district as part of capital
+      if (grepl("Sukhbaatar, Baganuur", candidate, ignore.case = TRUE) ||
+          grepl("Twenty-four. Sukhbaatar district", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Ulaanbaatar"
+      }
+      
+      # Label as Govisümber
+      if (grepl("Govisumber, Dornogovi province", candidate, ignore.case = TRUE) ||
+          grepl("Six. Dundgobi, Govisumber", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Govisümber"
+      }
+      
+      # Ordered alphabetically by first appearance of translated name                          
+      # Arhangay
+      if (grepl("Arkhangai", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Arhangay"
+      }
+      
+      # Övörhangay
+      else if (grepl("Uvurkhangai", candidate, ignore.case = TRUE) ||
+               grepl("Medieval", candidate, ignore.case = TRUE) ||
+               grepl("URKHANGY", candidate, ignore.case = TRUE) ||
+               grepl("Ovorkhangai", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Övörhangay"
+      }
+      
+      # Bayan-Ölgiy
+      else if (grepl("ÁAßN-OLGI", candidate, ignore.case = TRUE) ||
+               grepl("Ulgii", candidate, ignore.case = TRUE) ||
+               grepl("Bayan Olgi", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Bayan-Ölgiy"
+      }
+      
+      # Bayanhongor
+      else if (grepl("ÁAßNHONGOR", candidate, ignore.case = TRUE) ||
+               grepl("Bayan-khongor", candidate, ignore.case = TRUE) ||
+               grepl("Bayankhongor", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Bayanhongor"
+      }
+      
+      # Bulgan
+      else if (grepl("ÁULGAN", candidate, ignore.case = TRUE) ||
+               grepl("BULGAN", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Bulgan"
+      }
+      
+      # Darhan-Uul
+      else if (grepl("Darhan", candidate, ignore.case = TRUE) ||
+               grepl("Darkhan-Uul", candidate, ignore.case = TRUE) ||
+               grepl("Ten Nine. Darkhan-Uul Aimag", candidate, ignore.case = TRUE) ||
+               grepl("Darkhan Uul", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Darhan-Uul"
+      }
+      
+      # Ulaanbaatar (Capital)
+      else if (grepl("Baganuur", candidate, ignore.case = TRUE) ||
+               grepl("Bakhangai", candidate, ignore.case = TRUE) ||
+               grepl("Bayangol", candidate, ignore.case = TRUE) ||
+               grepl("Bayanzurkh", candidate, ignore.case = TRUE) ||
+               grepl("Chingeltei", candidate, ignore.case = TRUE) ||
+               grepl("Khan-Uul", candidate, ignore.case = TRUE) ||
+               grepl("Nalaikh", candidate, ignore.case = TRUE) ||
+               grepl("Songinokhairkhan", candidate, ignore.case = TRUE) ||
+               grepl("Songinohairkhan", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Ulaanbaatar"
+      }
+      
+      # Dzavhan
+      else if (grepl("ÇAÂKHAN", candidate, ignore.case = TRUE) ||
+               grepl("Dzavchan", candidate, ignore.case = TRUE) ||
+               grepl("Zavkhan", candidate, ignore.case = TRUE) ||
+               grepl("Zawkhan", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Dzavhan"
+      }
+      
+      # Töv
+      else if (grepl("Center", candidate, ignore.case = TRUE) ||
+               grepl("Tuv Aimag", candidate, ignore.case = TRUE) ||
+               grepl("TUKH", candidate, ignore.case = TRUE) ||
+               grepl("Tov", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Töv"
+      }
+      
+      # Govisümber 
+      else if (grepl("Choir", candidate, ignore.case = TRUE) ||
+               grepl("GOÂÜ-SUMÁR", candidate, ignore.case = TRUE) ||
+               grepl("Gov'-Sumber", candidate, ignore.case = TRUE) ||
+               grepl("Govisumber", candidate, ignore.case = TRUE) ||
+               grepl("GoVSOMBER", candidate, ignore.case = TRUE) ||
+               grepl("Gökçeşmeşır", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Govisümber"
+      }
+      
+      # Dornogovi
+      else if (grepl("DornogoÂÜ", candidate, ignore.case = TRUE) ||
+               grepl("Dornogobi", candidate, ignore.case = TRUE) ||
+               grepl("Dornogov'", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Dornogovi"
+      }
+      
+      # Dundgovi
+      else if (grepl("Dundgobi", candidate, ignore.case = TRUE) ||
+               grepl("Dundgov'", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Dundgovi"
+      }
+      
+      # Durnod
+      else if (grepl("East", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Dornod"
+      }
+      
+      # Hentiy
+      else if (grepl("Khentii", candidate, ignore.case = TRUE) ||
+               grepl("Kentucky", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Hentiy"
+      }
+      
+      # Ömnögovi
+      else if (grepl("Southgobi", candidate, ignore.case = TRUE) ||
+               grepl("Landscape", candidate, ignore.case = TRUE) ||
+               grepl("Ömnögov'", candidate, ignore.case = TRUE) ||
+               grepl("Umnugobi", candidate, ignore.case = TRUE) ||
+               grepl("Omnogobi", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Ömnögovi"
+      }
+      
+      # Orhon
+      else if (grepl("Erdenet", candidate, ignore.case = TRUE) ||
+               grepl("Orkhon", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Orhon"
+      }
+      
+      # Selenge
+      else if (grepl("Gaeilge", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Selenge"
+      }
+      
+      # Govi-Altay
+      else if (grepl("Gobi-Altai", candidate, ignore.case = TRUE) ||
+               grepl("Goethe-alta", candidate, ignore.case = TRUE) ||
+               grepl("Gov'-Altai", candidate, ignore.case = TRUE) ||
+               grepl("Gov'-Altay", candidate, ignore.case = TRUE) ||
+               grepl("Gobi Altai", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Govi-Altay"
+      }
+      
+      # Hovd
+      else if (grepl("HOED", candidate, ignore.case = TRUE) ||
+               grepl("Khovd", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Hovd"
+      }
+      
+      # Hövsgöl
+      else if (grepl("Khuvsgul", candidate, ignore.case = TRUE) ||
+               grepl("Sketch", candidate, ignore.case = TRUE) ||
+               grepl("Template", candidate, ignore.case = TRUE) ||
+               grepl("Khovsgol", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Hövsgöl"
+      }
+      
+      # Sühbaatar
+      else if (grepl("Twelve. Sukhbaatar province", candidate, ignore.case = TRUE) ||
+               grepl("Sukhbaatar province", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Sühbaatar"
+      }
+      
+      # Uvs
+      else if (grepl("UAS", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "Uvs"
+      }
+      
+      # Unclear Province/District Sühbaatar
+      else if (grepl("Sukhbaatar", candidate, ignore.case = TRUE) ||
+               grepl("Sühbaatar", candidate, ignore.case = TRUE)){
+        translatedList[i, 3] <- "UNCLEAR Sühbaatar"
+      }
+      
+    }
+  }
+  
+  # Manual Corrections
+  for (i in 1:nrow(translatedList)){
+    if (grepl("Sühbaatar", translatedList[i, 2], fixed = TRUE) &&
+        grepl("Sühbaatar", translatedList[i, 3], fixed = TRUE)){
+      translatedList[i, 3] <- "UNCLEAR Sühbaatar"
+    }
+    
+    if (grepl("Govisumber, Dornogovi province", translatedList[i, 2], fixed = TRUE) &&
+        grepl("Dornogovi", translatedList[i, 3], fixed = TRUE)){
+      translatedList[i, 3] <- "Govisümber"
+    }
+    
+    if (grepl("ӨМНӨГОÂÜ", translatedList[i, 1], fixed = TRUE)){
+      translatedList[i, 3] <- "Ömnögovi"
+    }
+  }
+  
+  return(translatedList)
+  
+}
+
+# Code used to prepare CLEA data for processing
+formatCLEAData <- function(rawCLEA, mappedRegions){
+  
+  # 2008, 2012
+  batch_A <- rawCLEA %>% 
+    filter (yr >= 2008, yr <= 2012)
+  
+  # 2016
+  batch_B <- rawCLEA %>%
+    filter (yr == 2016)
+  
+  # 2020
+  batch_C <- rawCLEA %>%
+    filter (yr == 2020)
+  
+  batch_A <- batch_A %>%
+    left_join(mappedRegions, by = c("cst_n" = "original")) %>%
+    mutate(
+      subNat = ifelse(translatedRegion == "Sukhbaatar District", "Ulaanbaatar", subNat),
+      subNat = ifelse(translatedRegion == "Sukhbaatar", "Sühbaatar", subNat)
+    )
+  # For some reason, Dornogovi and Govisümber counted together. Create two data rows
+  # and count as same
+  bAUpdate <- data.frame(yr = 2008, mn = 6, ctr_n = "Mongolia", sub = -990, cst_n = "Gobisumber, Dornogobi",
+                         cst = 12, pty_n = "Mongolian People's Revolutionary Party", 
+                         vv1 = 32214, pv1 = 15013, translatedRegion = "Gobisumber, Dornogobi",
+                         subNat = "Govisümber") 
+  bAUpdate <- rbind(bAUpdate, data.frame(yr = 2012, mn = 6, ctr_n = "Mongolia", sub = -990, cst_n = "Gobisumber, Dornogobi",
+                                         cst = 12, pty_n = "Mongolian People's Party", 
+                                         vv1 = 32164, pv1 = 11834, translatedRegion = "Gobisumber, Dornogobi",
+                                         subNat = "Govisümber"))
+  
+  batch_A <- rbind(batch_A, bAUpdate)
+  
+  batch_B <- batch_B %>%
+    left_join(mappedRegions, by = c("sub" = "original"))
+  
+  batch_C <- batch_C %>%
+    left_join(mappedRegions, by = c("cst_n" = "original")) %>%
+    mutate(
+      subNat = ifelse(subNat == "UNCLEAR Sühbaatar", "Ulaanbaatar", subNat)
+    )
+  # Note. For 2020, Govisümber and Dundgovi are counted together and there are 
+  # duplicate results. For the analysis, use the same results for both. 
+  
+  # Change to Dundgovi for analysis. Other parties irrelevant bc not in power
+  batch_C$subNat[80] = "Dundgovi"
+  
+  return(rbind(batch_A, batch_B, batch_C))
+  
+}
+
+# Code used to prepare manual data for processing
+formatManualData <- function(manual, mappedRegions){
+  
+  manual <- manual %>%
+    left_join(mappedRegions, by = c("district_n" = "original")) %>%
+    filter(!(subNat == "UNCLEAR AFFILIATION")) %>%
+    mutate(
+      subNat = ifelse(subNat == "UNCLEAR Sühbaatar", "Sühbaatar", subNat)
+    )
+  
+  return(manual)
+  
+}
+
+# Code used to create and populate missing data rows for years with no data
+createEmptyYears <- function(tracker, subNames, source, note){
+  
+  # If all election years have data 
+  if (sum(tracker$haveData) == nrow(tracker)){
+    column_names <- c("NAME_0", "GID_0", "NAME_1", "year", "month", "exe_leg", "round", 
+                      "incumbent_party", "vote_share_incumbent", "party_turnover",
+                      "source", "note")
+    
+    empty_df <- data.frame(matrix(ncol = length(column_names), nrow = 0,
+                                  dimnames = list(NULL, column_names)))
+    
+    return(empty_df)
+  }
+  
+  base <- data.frame()
+  
+  for (i in 1:nrow(tracker)){
+    elecBase <- data.frame()
+    
+    if (tracker[i,3] == 0){ #if the year has no data
+      thisYear <- as.numeric(tracker[i, 1])
+      thisMonth <- as.numeric(tracker[i, 2])
+      exLe <- as.character(tracker[i, 4])
+      country <- as.character(subNames[1, 1])
+      countryCode <- as.character(subNames[1, 2])
+      
+      thisRound <- 0
+      
+      if (exLe == "exe"){
+        thisRound <- 1
+      }
+      
+      
+      for (j in 1:nrow(subNames)){
+        subName <- as.character(subNames[j, 3])
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = subName, year = thisYear, month = thisMonth,
+                         exe_leg = exLe, round = thisRound, incumbent_party = ".", 
+                         vote_share_incumbent = ".", party_turnover = ".",
+                         source = src, note = nt)
+        
+        elecBase <- rbind(elecBase, df)
+        
+      }
+      
+      base <- rbind(base, elecBase)
+      
+    }
+    
+  }
+  
+  base <- base[, c("NAME_0", "GID_0", "NAME_1", "year", "month", 
+                   "exe_leg", "round", "incumbent_party", 
+                   "vote_share_incumbent", "party_turnover", 
+                   "source", "note")]
+  return(base)
+}
+
+# Code used to create and populate missing data rows for ADM1 regions with 
+# no data in a given year
+fillEmpty <- function(resultList, subNames){
+  base <- data.frame()
+  
+  for (i in 1:length(resultList)){
+    currElection <- resultList[[i]]
+    
+    # get provs that don't have a result
+    missingProvs <- setdiff(subNames$NAME_1, currElection$NAME_1)
+    
+    if (length(missingProvs) > 0){
+      thisYear <- as.numeric(currElection[1, 4])
+      thisMonth <- as.numeric(currElection[1, 5])
+      exLe <- as.character(currElection[1, 6])
+      country <- as.character(currElection[1, 1])
+      countryCode <- as.character(currElection[1, 2])
+      incumParty <- as.character(currElection[1, 8])
+      thisRound <- 0
+      turnover <- as.numeric(currElection[1, 10])
+      src <- as.character(currElection[1, 11])
+      nt <- as.character(currElection[1, 12])
+      
+      if (exLe == "exe"){
+        thisRound <- 1
+      }
+      
+      for (prov in missingProvs){
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = as.character(prov), year = thisYear, month = thisMonth,
+                         exe_leg = exLe, round = thisRound, incumbent_party = incumParty, 
+                         vote_share_incumbent = ".", party_turnover = turnover,
+                         source = src, note = nt)
+        
+        currElection <- rbind(currElection, df)
+        
+      }
+      
+    }
+    
+    base <- rbind(base, currElection)
+    
+  }
+  
+  return(base)
+  
+}

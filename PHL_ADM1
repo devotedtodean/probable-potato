@@ -1,0 +1,1616 @@
+##############################################################
+# Philippines - PHL
+##############################################################
+# 
+# Note: code had to be adjusted to reflect inconsistent party
+# labeling practices. Additionally, code had to be adjusted
+# because candidates from same party run multiple times in the
+# same district
+#
+##############################################################
+
+setwd("D:/Kien Work/ProfSchneiderRASP25-SU25")
+#setwd("C:/Work/ProfSchneiderRASP25-SU25")
+rm(list = ls())
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(purrr)
+library(openxlsx)
+
+##############################################################
+
+
+
+
+# CLEA
+CLEA <- load("D:/Kien Work/ProfSchneiderRASP25-SU25/clea_lc_20240419_r/clea_lc_20240419_r/clea_lc_20240419.RData")
+#CLEA <- load("C:/Work/ProfSchneiderRASP25-SU25/clea_lc_20240419_r/clea_lc_20240419_r/clea_lc_20240419.RData")
+CLEA <- clea_lc_20240419
+rm(clea_lc_20240419)
+
+CLEA_PHL_RAW <- CLEA %>% 
+  filter (ctr_n == "Philippines", yr >= 1987) %>%
+  select (yr, mn, ctr_n, sub, cst_n, cst, pty_n, vv1, pv1)
+
+manual_data <- read_excel("philippines2019-2025_final.xlsx")
+
+
+
+
+##############################################################
+# CLEA LABEL CORRECTION
+##############################################################
+
+
+
+
+philSubnational <- read_excel("GADM_ADM1.xlsx") %>% 
+  filter(NAME_0 == "Philippines") %>%
+  select(NAME_0, GID_0, NAME_1)
+
+table(CLEA_PHL_RAW$sub)
+table(CLEA_PHL_RAW$cst_n)
+
+#use cst_n
+#funky: taguig city (multiple), shariff kabunsuan, san juan city - mandaluyong/SAN JOSE DEL MONTE CITY
+#quezon has a bunch, Pateros-Taguig city, pasig city, pasay city, Parañaque, navotas city,
+#national constituency (yikes), manila city (should be metro. manila), 
+#malabon city - navotas city, malabon city, malabon-navotas, makati city, 
+#Las Piñas-Muntinlupa, lapu-lapu city (opon), iligan city, davao city?, COTABATO (NORTH COT.), 
+#closed list?, city of valenzuela, city of pasig, city of parañaque, city of muntinlupa, 
+#city of marikina, manila, makati, las piñas, antipolo, cebu city, 
+#CEBU - LAPU-LAPU CITY (OPON), caloocan city, cagayan de oro city, 
+#BULACAN - SAN JOSE DEL MONTE CITY,BENGUET - BAGUIO CITY, baguio city, bacolod city,
+#
+#
+#"NCR - TAGUIG CITY (1ST COUNCILOR DISTRICT) - PATEROS"
+#actually a bunch with "NCR - " and some city names: taguig, quezon, pasay, manila
+#malabon, valenzuela, pasig, parañaque, muntinlupa, marikina, mandaluyong, makati,
+#las piñas/pinas, caloocan, Malabon-Navotas, lapu lapu,  Las Piñas-Muntinlupa
+
+#NOTE. Kalinga-Apayao is a district that is composed of Kalinga and Apayao. 
+#average results and apply to both, num 83
+#
+#stopped validating with isabela, didn't get results for after
+#
+#all follow a similar format. some in all caps, all lower case, as title, all caps
+#"PROVINCE - first LEGDIST/second LEGDIST/ LONE LEGDIST"
+
+#Preprocessing. There are some elections where vote count data is missing and coded
+#as negative. Remove
+CLEA_PHL_RAW <- CLEA_PHL_RAW %>%
+  filter(pv1 >= 0, vv1 >= 0)
+
+#If the ADM1 region is in the name of cst_n, store as adm1 name
+# Clean region reference list
+region_names <- philSubnational %>% 
+  pull(3) %>% 
+  as.character()
+
+# Helper function to match region names
+match_regions <- function(text) {
+  text_lower <- str_to_lower(text)
+  
+  if (str_detect(text_lower, "kalinga apayao")) {
+    return(c("Kalinga", "Apayao"))
+  }
+  else if (str_detect(text_lower, "kalinga-apayao")) {
+    return(c("Kalinga", "Apayao"))
+  }
+  
+  matches <- region_names[str_detect(text_lower, str_to_lower(region_names))]
+  
+  if (length(matches) == 1) {
+    return(matches)
+  } else {
+    return(NA_character_)
+  }
+}
+
+# Main processing pipeline
+CLEA_PHL <- CLEA_PHL_RAW %>%
+  mutate(
+    match_result = map(.[[5]], match_regions),  # List column of 1 or more matches
+    subNat = match_result
+  ) %>%
+  unnest(subNat) %>%
+  select(-match_result)
+
+# Leftover cases for capital names
+leftovers <- CLEA_PHL %>%
+  filter(is.na(subNat))
+
+# List of capital region keywords
+ncr_keywords <- c(
+  "NCR", "National Capital Region", "Manila", "Caloocan", "Las Piñas", "Makati",
+  "Malabon", "Mandaluyong", "Marikina", "Muntinlupa", "Navotas", "Parañaque",
+  "Pasay", "Pasig", "Pateros", "San Juan", "Taguig", "Valenzuela"
+)
+
+# Combine keywords into a regex pattern
+ncr_pattern <- str_c(ncr_keywords, collapse = "|")
+
+# Assign "Metropolitan Manila" where conditions are met
+CLEA_PHL <- CLEA_PHL %>%
+  mutate(subNat = if_else(
+    is.na(subNat) & str_detect(sub, regex(ncr_pattern, ignore_case = TRUE)),
+    "Metropolitan Manila", subNat))
+
+leftovers <- CLEA_PHL %>%
+  filter(is.na(subNat))
+
+#Leftover cases for manual recoding
+#Cities that are administered autonomously but tracked under regions: Davao, 
+#Zamboanga, Bacolod, Antipolo, Baguio, Iligan, Lapu Lapu (Opon), San Jose
+for (i in 1:nrow(CLEA_PHL)){
+  if (is.na(CLEA_PHL$subNat[i])){
+    getSubName <- CLEA_PHL$cst_n[i]
+    
+    if (grepl("Davao", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Davao del Sur"
+    }
+    else if (grepl("Eastern Samar", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Eastern Samar"
+    }
+    else if (grepl("Northern Samar", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Northern Samar"
+    }
+    else if (grepl("Southern Leyte", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Southern Leyte"
+    }
+    else if (grepl("zamboanga city", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Zamboanga del Sur"
+    }
+    else if (grepl("Bacolod City", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Negros Occidental"
+    }
+    else if (grepl("Antipolo", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Rizal"
+    }
+    else if (grepl("Baguio", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Benguet"
+    }
+    else if (grepl("North Cot.", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "North Cotabato"
+    }
+    else if (grepl("Iligan", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Lanao del Norte"
+    }
+    else if (grepl("Lapu Lapu", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Cebu"
+    }
+    else if (grepl("San Jose", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Bulacan"
+    }
+    else if (grepl("Opon", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Cebu"
+    }
+    else if (grepl("Cagayan", getSubName, ignore.case = TRUE)){
+      CLEA_PHL$subNat[i] <- "Misamis Oriental"
+    }
+  }
+}
+
+leftovers <- CLEA_PHL %>%
+  filter(is.na(subNat))
+#144 results unable to be labeled by CLEA from 2016 and 2019 where data is
+#recorded on a national scale and not broken down by province. 
+
+CLEA_PHL <- CLEA_PHL %>%
+  filter(!is.na(subNat))
+rm(CLEA_PHL_RAW)
+rm(leftovers)
+
+# Now label manual data
+manual_data <- manual_data %>%
+  filter(party_votes/total_votes <= 100)
+
+manual_data$subNat <- NA
+
+# Main processing pipeline
+manual_PHL <- manual_data %>%
+  mutate(
+    match_result = map(.[[2]], match_regions),  # List column of 1 or more matches
+    subNat = match_result
+  ) %>%
+  unnest(subNat) %>%
+  select(-match_result)
+
+# Assign "Metropolitan Manila" where conditions are met
+manual_PHL <- manual_PHL %>%
+  mutate(subNat = if_else(
+    is.na(subNat) & str_detect(district, regex(ncr_pattern, ignore_case = TRUE)),
+    "Metropolitan Manila", subNat))
+
+# Leftover cases for capital names
+leftovers <- manual_PHL %>%
+  filter(is.na(subNat))
+
+#Leftover cases for manual recoding
+#Cities that are administered autonomously but tracked under regions: Davao, 
+#Zamboanga, Bacolod, Antipolo, Baguio, Iligan, Lapu Lapu (Opon), San Jose
+for (i in 1:nrow(manual_PHL)){
+  if (is.na(manual_PHL$subNat[i])){
+    getSubName <- manual_PHL$district[i]
+    
+    if (grepl("Davao City", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "Davao del Sur"
+    }
+    else if (grepl("Eastern Samar", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "Eastern Samar"
+    }
+    else if (grepl("Northern Samar", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "Northern Samar"
+    }
+    else if (grepl("Southern Leyte", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "Southern Leyte"
+    }
+    else if (grepl("Davao De Oro", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "Compostela Valley"
+    }
+    else if (grepl("Baguio", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "Benguet"
+    }
+    else if (grepl("Cotabato", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "North Cotabato"
+    }
+    else if (grepl("Davao Occidental", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "Davao del Sur"
+    }
+    else if (grepl("North Cot.", getSubName, ignore.case = TRUE)){
+      manual_PHL$subNat[i] <- "North Cotabato"
+    }
+  }
+}
+
+# CORRECT QUEZON/QUEZON CITY IN BOTH SETUPS. DIFFERENT
+# Assign "Metropolitan Manila" where conditions are met
+CLEA_PHL <- CLEA_PHL %>%
+  mutate(subNat = if_else(
+    grepl("Quezon City", cst_n, ignore.case = TRUE), "Metropolitan Manila", subNat))
+
+manual_PHL <- manual_PHL %>%
+  mutate(subNat = if_else(
+    grepl("Quezon City", district, ignore.case = TRUE), "Metropolitan Manila", subNat))
+
+rm(manual_data)
+rm(leftovers)
+
+
+
+
+##############################################################
+# Year-by-year elections
+##############################################################
+
+
+
+
+# house
+electionYears <- CLEA_PHL %>% 
+  select(yr, mn) %>%
+  distinct() %>%
+  mutate(haveData = 0, exe_leg = "leg")
+#1987, 1992, 1995, 1998, 2001, 2004, 2007, 2010, 2016, 2019
+
+missingYearA <- data.frame(yr = 2013, mn = 5, haveData = 0, exe_leg = "leg")
+missingYearB <- data.frame(yr = 2022, mn = 5, haveData = 0, exe_leg = "leg")
+missingYearC <- data.frame(yr = 2025, mn = 5, haveData = 0, exe_leg = "leg")
+
+missingYears <- rbind(missingYearA, missingYearB, missingYearC)
+
+electionYears <- rbind(electionYears, missingYears) %>%
+  arrange(yr)
+
+rm(missingYearA, missingYearB, missingYearC, missingYears)
+
+# senate
+senateElectionYears <- CLEA_PHL %>% 
+  select(yr, mn) %>%
+  distinct() %>%
+  mutate(haveData = 0, exe_leg = "leg")
+#1987, 1992, 1995, 1998, 2001, 2004, 2007, 2010, 2016, 2019
+
+missingYearA <- data.frame(yr = 2013, mn = 5, haveData = 0, exe_leg = "leg")
+missingYearB <- data.frame(yr = 2022, mn = 5, haveData = 0, exe_leg = "leg")
+missingYearC <- data.frame(yr = 2025, mn = 5, haveData = 0, exe_leg = "leg")
+
+missingYears <- rbind(missingYearA, missingYearB, missingYearC)
+
+senateElectionYears <- rbind(senateElectionYears, missingYears) %>%
+  arrange(yr)
+
+rm(missingYearA, missingYearB, missingYearC, missingYears)
+
+# president
+#1986, 1992, 1998, 2004, 2010, 2016, 2022
+
+missingYearA <- data.frame(yr = 1986, mn = 5, haveData = 0, exe_leg = "exe")
+missingYearB <- data.frame(yr = 1992, mn = 5, haveData = 0, exe_leg = "exe")
+missingYearC <- data.frame(yr = 1998, mn = 5, haveData = 0, exe_leg = "exe")
+missingYearD <- data.frame(yr = 2004, mn = 5, haveData = 0, exe_leg = "exe")
+missingYearE <- data.frame(yr = 2010, mn = 5, haveData = 0, exe_leg = "exe")
+missingYearF <- data.frame(yr = 2016, mn = 5, haveData = 0, exe_leg = "exe")
+missingYearG <- data.frame(yr = 2022, mn = 5, haveData = 0, exe_leg = "exe")
+
+missingYears <- rbind(missingYearA, missingYearB, missingYearC, missingYearD, missingYearE, missingYearF, missingYearG)
+
+presidentialElectionYears <- missingYears %>%
+  arrange(yr)
+
+rm(missingYearA, missingYearB, missingYearC, missingYearD, missingYearE, missingYearF, missingYearG, missingYears)
+
+
+
+
+################################################################################
+#Lower: House of Representatives
+#1987 incumbent "New Society Movement" ~"Kilusang Bagong Lipunan", winner: "PDP-LABAN"
+
+wasTurnover <- 1 #Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("KBL", # KBL
+                    "Kilusang Bagong" # KBL
+                    ) # Old Coalition Members
+incumbentPartyName <- "New Society Movement (Kilusang Bagong Lipunan, KBL)"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 1987
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_1987 <- curr
+
+electionYears[1, 3] <- 1 # this election has data
+
+################################################################################
+#1992 - incumbent: "Fight of Democratic Filipinos" ~"Laban ng Demokratikong Pilipino", LDP, "Laban ng Demokratikong Pilipino", LDP, won
+
+wasTurnover <- 0 #Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("LDP", # LDP
+                    "Laban", # LDP
+                    "Partido Demokratiko Pilipino",
+                    "PDP"
+                    ) # Old Coalition Members
+incumbentPartyName <- "Fight of Democratic Filipinos (Laban ng Demokratikong Pilipino, LDP)"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 1992
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_1992 <- curr
+
+electionYears[2, 3] <- 1 # this election has data
+
+################################################################################
+#1995 - incumbent: "Fight of Democratic Filipinos Party", "Laban ng Demokratikong Pilipino", LDP; "LAKAS/LABAN" coalition won
+
+#ALSO NOTE. this election saw province of Kalinga-Apayao split into two. so from this point
+#forward the elections will happen in both provinces but before they had combined results
+
+# Although the coalition largely remained the same, the parties changed so code as turnover
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Lakas", # lakas-national union of christian democrats-united muslim democrats of the philippines (Lakas - NUCD - UMDP)
+                    "Laban", # LDP
+                    "nationalist people's coalition" # nationalist peoples coalition
+                    ) # Old Coalition Members
+incumbentPartyName <- "Fight of Democratic Filipinos (Laban ng Demokratikong Pilipino, LDP)"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 1995
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_1995 <- curr
+
+electionYears[3, 3] <- 1 # this election has data
+
+################################################################################
+#1998 - incumbent: "LAKAS/LABAN" ~"LAKAS/LABAN", //, "Lakas—NUCD—UMDP" won
+
+# "The newly created province of Compostela Valley (now known as "Davao de Oro") held its first local elections on this day as well."
+# North Cotabato has duplicate results. It is necessary to manually remove these duplicates (row 149, 151) to prevent false totals
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Lakas" # lakas-national union of christian democrats-united muslim democrats of the philippines (Lakas - NUCD - UMDP)
+                    ) # Old Coalition Members
+incumbentPartyName <- "Lakas-NUCD-UMDP Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 1998
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# For this election only, removes duplicate result
+curr <- curr[-c(149, 151),] 
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_1998 <- curr
+
+electionYears[4, 3] <- 1 # this election has data
+
+################################################################################
+#2001 - incumbent: "Lakas—NUCD—UMDP", //, "Lakas—NUCD—UMDP" won
+
+# Zamboanga Sibugay held first elections
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Lakas", # lakas-national union of christian democrats-united muslim democrats of the philippines (Lakas - NUCD - UMDP)
+                    "partido liberal ng pilipinas", # Liberal Party
+                    "nationalist people's coalition", # NPC
+                    "partido nacionalista" # Nationalist Party
+                    ) # Old Coalition Members
+incumbentPartyName <- "Lakas-NUCD-UMDP Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2001
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_2001 <- curr
+
+electionYears[5, 3] <- 1 # this election has data
+
+################################################################################
+#2004 - incumbent: "Lakas—NUCD—UMDP", // "LAKAS-CMD"
+#same as nucd-umdp - merged with CMD
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Lakas", # lakas-christian muslim democratcs (Lakas-CMD)
+                    "lakas-cmd", # Lakas
+                    "partido liberal ng pilipinas", # Liberal Party
+                    "lp", # Liberal Party
+                    "nationalist people's coalition", # NPC
+                    "npc", # NPC
+                    "partido nacionalista", # Nationalist Party
+                    "partido demokratiko sosyalista ng pilipinas", # partido demokratiko sosyalista ng pilipinas
+                    "kabalikat ng malayang pilipino", # KAMPI
+                    "kampi"
+                    ) # Old Coalition Members
+incumbentPartyName <- "Lakas–CMD Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2004
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_2004 <- curr
+
+electionYears[6, 3] <- 1 # this election has data
+
+################################################################################
+#2007 - incumbent: ""LAKAS-CMD", // "LAKAS-KAMPI-CMD"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Lakas", # lakas-christian muslim democratcs (Lakas-CMD)
+                    "lakas-cmd", # Lakas
+                    "partido liberal ng pilipinas", # Liberal Party
+                    "lp", # Liberal Party
+                    "nationalist people's coalition", # NPC
+                    "npc", # NPC
+                    "partido nacionalista", # Nationalist Party
+                    "partido demokratiko sosyalista ng pilipinas", # partido demokratiko sosyalista ng pilipinas
+                    "kabalikat ng malayang pilipino", # KAMPI
+                    "kampi"
+                    ) # Old Coalition Members
+incumbentPartyName <- "Lakas–CMD Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2007
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_2007 <- curr
+
+electionYears[7, 3] <- 1 # this election has data
+
+################################################################################
+#2010 - incumbent: "LAKAS-CMD", // "LAKAS KAMPI - CMD"
+
+# Even though there was technically no turnover, many members defected to Liberal after Liberal won the presidency
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Lakas", # lakas-christian muslim democratcs (Lakas-CMD)
+                    "partido liberal ng pilipinas", # Liberal Party
+                    "nationalist people's coalition", # NPC
+                    "partido nacionalista", # Nationalist Party
+                    "partido demokratiko sosyalista ng pilipinas", # partido demokratiko sosyalista ng pilipinas
+                    "kabalikat ng malayang pilipino", # KAMPI
+                    "kampi"
+                    ) # Old Coalition Members
+incumbentPartyName <- "Lakas–KAMPI-CMD Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2010
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_2010 <- curr
+
+electionYears[8, 3] <- 1 # this election has data
+
+################################################################################
+#2013 - incumbent: ""LAKAS KAMPI - CMD", // "Liberal Party" ~ "Liberal ng Pilipinas, LP"
+
+# CLEA data doesn't have workable vote totals
+
+################################################################################
+#2016 - incumbent: "Liberal Party" ~ "Liberal ng Pilipinas, LP"; "Liberal Party" ~ "Liberal ng Pilipinas, LP"
+
+# There was technically no turnover but many reps switched to PDP-Laban after the president won. Wait for Jingke
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Partido Liberal Ng Pilipinas", # Liberal Party
+                    "United Nationalist Alliance" # NPC
+                    ) # Old Coalition Members
+incumbentPartyName <- "Liberal Party Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2016
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_2016 <- curr
+
+electionYears[10, 3] <- 1 # this election has data
+
+################################################################################
+#2019 - incumbent: PDP-Laban coalition; winner: PDP-Laban
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("PDP-Laban", # PDP-Laban
+                    "Lakas", # Lakas-CMD
+                    "National Unity Party", # National Unity Party
+                    "Nationalist People's Coalition", # Nationalist People's Coalition
+                    "Nacionalista Party", # Nationalist Party
+                    "Centrist Democratic Party of the Philippines" # CDP
+                    ) # Old Coalition Members
+incumbentPartyName <- "PDP-Laban Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2019
+
+curr <- CLEA_PHL %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_PHL_2019 <- curr
+
+electionYears[11, 3] <- 1 # this election has data
+
+################################################################################
+#2022 - incumbent: PDP Laban coalition; winner: PDP Laban
+#not in CLEA, use manual
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("PDPLBN", # PDP-Laban
+                    "NP", # Nationalist Party
+                    "NPC", # Nationalist People's Coalition
+                    "NUP", # National Unity Party
+                    "LAKAS" # Lakas CMD
+                    ) # Old Coalition Members
+incumbentPartyName <- "PDP-Laban Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://2022electionresults.comelec.gov.ph/#/coc/0"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2022
+
+curr <- manual_PHL %>%
+  filter(year == thisYear, type == "House") %>%
+  select(-source) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, total_votes) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(total_votes))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_name, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(party_votes))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = subNat, incumbent_party = party_name) %>%
+  mutate (GID_0 = "PHL", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+manual_PHL_2022 <- curr
+
+electionYears[12, 3] <- 1 # this election has data
+
+################################################################################
+#2025 - incumbent: LAKAS coalition; winner: LAKAS Coalition
+#not in CLEA, use manual
+# PDP won last one but at the time of the election, most reps switched to LAKAS
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("PFP", # Partido Federal ng Pilipinas
+                    "NP", # Nationalist Party
+                    "NPC", # Nationalist People's Coalition
+                    "NUP", # National Unity Party
+                    "LAKAS" # Lakas CMD
+                    ) # Old Coalition Members
+incumbentPartyName <- "LAKAS Coalition"
+noteToAdd <- "House of Representatives"
+sourceUsed <- "https://www.gmanetwork.com/news/eleksyon/2025/results/provincial/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2025
+
+curr <- manual_PHL %>%
+  filter(year == thisYear, type == "House") %>%
+  select(-source) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, total_votes) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(total_votes))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_name, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(party_votes))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = subNat, incumbent_party = party_name) %>%
+  mutate (GID_0 = "PHL", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+manual_PHL_2025 <- curr
+
+electionYears[13, 3] <- 1 # this election has data
+
+
+
+
+################################################################################
+#Upper: Senate
+#2019 incumbent: PDP Laban Coalition; winner: PDP Laban Coalition
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("PDPLBN", # PDP-Laban
+                    "NP", # Nationalist Party
+                    "NPC" # Nationalist People's Coalition
+                    ) # Old Coalition Members
+incumbentPartyName <- "PDP-Laban Coalition"
+noteToAdd <- "Senate"
+sourceUsed <- "https://www.gmanetwork.com/news/eleksyon2019/results/quick_links/city/?tfb_a#local"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2019
+
+curr <- manual_PHL %>%
+  filter(year == thisYear, type == "Senate") %>%
+  select(-source) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, total_votes) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(total_votes))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_name, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(party_votes))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = subNat, incumbent_party = party_name) %>%
+  mutate (GID_0 = "PHL", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+manual_sen_PHL_2019 <- curr
+senateElectionYears[11, 3] <- 1 # this election has data
+
+################################################################################
+#2022 incumbent: PDP Laban Coalition; winner: PDP Laban coalition
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("PDPLBN", # PDP-Laban
+                    "NP", # Nationalist Party
+                    "NPC", # Nationalist People's Coalition
+                    "LAKAS"
+                    ) # Old Coalition Members
+incumbentPartyName <- "PDP-Laban Coalition"
+noteToAdd <- "Senate"
+sourceUsed <- "https://2022electionresults.comelec.gov.ph/#/coc/0"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2022
+
+curr <- manual_PHL %>%
+  filter(year == thisYear, type == "Senate") %>%
+  select(-source) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, total_votes) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(total_votes))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_name, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(party_votes))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = subNat, incumbent_party = party_name) %>%
+  mutate (GID_0 = "PHL", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+manual_sen_PHL_2022 <- curr
+senateElectionYears[12, 3] <- 1 # this election has data
+
+################################################################################
+#2025 incumbent: PDP Laban Coalition; winner: PFP coalition
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("PFP", # 
+                    "NP", # Nationalist Party
+                    "NPC" # Nationalist People's Coalition
+) # Old Coalition Members
+incumbentPartyName <- "PFP Coalition"
+noteToAdd <- "Senate"
+sourceUsed <- "https://www.gmanetwork.com/news/eleksyon/2025/results/provincial/"
+exeOrLeg <- "leg"
+countryCode <- "PHL"
+thisYear <- 2025
+
+curr <- manual_PHL %>%
+  filter(year == thisYear, type == "Senate") %>%
+  select(-source) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, total_votes) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(total_votes))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_name, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(party_votes))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = subNat, incumbent_party = party_name) %>%
+  mutate (GID_0 = "PHL", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+manual_sen_PHL_2025 <- curr
+senateElectionYears[13, 3] <- 1 # this election has data
+
+
+
+
+################################################################################
+#Presidential
+#2022 incumbent: PFP; winner: PFP
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("PFP"
+                    ) # Old Coalition Members
+incumbentPartyName <- "PFP"
+noteToAdd <- "President"
+sourceUsed <- "https://2022electionresults.comelec.gov.ph/#/coc/0"
+exeOrLeg <- "exe"
+countryCode <- "PHL"
+thisYear <- 2022
+
+curr <- manual_PHL %>%
+  filter(year == thisYear, type == "Presidential") %>%
+  select(-source) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, total_votes) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(total_votes))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_name, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(party_votes))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = subNat, incumbent_party = party_name) %>%
+  mutate (GID_0 = "PHL", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+manual_pres_PHL_2022 <- curr
+presidentialElectionYears[7, 3] <- 1 # this election has data
+
+
+
+
+##############################################################
+# Combine electoral Results
+##############################################################
+
+
+
+
+# create final database for house elections
+src <- "https://electiondataarchive.org/"
+nt <- "House of Representatives"
+
+dataList <- list(CLEA_PHL_1987, 
+                 CLEA_PHL_1992, 
+                 CLEA_PHL_1995, 
+                 CLEA_PHL_1998,
+                 CLEA_PHL_2001,
+                 CLEA_PHL_2004,
+                 CLEA_PHL_2007,
+                 CLEA_PHL_2010,
+                 CLEA_PHL_2016,
+                 CLEA_PHL_2019, 
+                 manual_PHL_2022,
+                 manual_PHL_2025)
+
+# Provinces added by splitting a bigger province into smaller ones
+newProvinceMap <- data.frame(
+  modern_province =      c("Biliran", "Guimaras", "Sarangani", "Kalinga", "Apayao", "Compostela Valley", "Zamboanga Sibugay",
+                           "Dinagat Islands", "Davao Occidental"),
+  predecessor_province = c("Leyte", "Iloilo", "South Cotabato", "Kalinga-Apayao", "Kalinga-Apayao", "Davao del Norte", "Zamboanga del Sur",
+                           "Surigao del Norte", "Davao del Sur"),
+  creation_year =        c(1992, 1992, 1992, 1995, 1995, 1998, 2001, 2006, 2013),
+  stringsAsFactors = FALSE
+)
+
+# Helper functions defined below
+noDataYears <- createEmptyYears(electionYears, philSubnational, src, nt)
+filledDataYears <- fillEmpty(dataList, philSubnational)
+
+# Next, populate data for new provinces, if it exists
+# Step 1: Prepare DFM - treat "." as NA for vote_share_incumbent
+clean_dfm <- filledDataYears %>%
+  mutate(vote_share_incumbent = ifelse(vote_share_incumbent == ".", NA, as.numeric(vote_share_incumbent)))
+
+# Step 2: Join mapping onto dfm to annotate each row with predecessor and creation year
+annotated_dfm <- clean_dfm %>%
+  left_join(newProvinceMap, by = c("NAME_1" = "modern_province"))
+
+# Step 3: Filter for rows where:
+# - the vote share is missing
+# - the year is before the creation year
+# - the predecessor is defined
+candidates <- annotated_dfm %>%
+  filter(
+    is.na(vote_share_incumbent),
+    !is.na(predecessor_province),
+    year <= creation_year
+  )
+
+# Step 4: Look up vote share from predecessor province in same year
+predecessor_values <- clean_dfm %>%
+  select(NAME_1, year, month, vote_share_incumbent) %>%
+  rename(
+    predecessor_province = NAME_1,
+    predecessor_vote_share = vote_share_incumbent
+  )
+
+# Step 5: Join to get predecessor values
+candidates_report <- candidates %>%
+  left_join(predecessor_values, by = c("predecessor_province", "year", "month")) %>%
+  filter(!is.na(predecessor_vote_share)) %>%
+  select(
+    year,
+    month,
+    modern_province = NAME_1,
+    predecessor_province,
+    predecessor_vote_share,
+    current_value = vote_share_incumbent
+  )
+
+# candidates_report contains all cases worth reviewing for manual filling
+
+# Step 6: Update filledDataYears with values from candidates_report
+filledDataYears <- filledDataYears %>%
+  mutate(vote_share_incumbent = ifelse(vote_share_incumbent == ".", NA, as.numeric(vote_share_incumbent))) %>%
+  left_join(candidates_report, by = c("NAME_1" = "modern_province", "year", "month")) %>%
+  mutate(
+    vote_share_incumbent = coalesce(predecessor_vote_share, vote_share_incumbent),
+    note = case_when(
+      !is.na(predecessor_vote_share) & !is.na(note) ~ paste0(note, ". This result was copied from ", predecessor_province, "."),
+      !is.na(predecessor_vote_share) & is.na(note) ~ paste0("This result was copied from ", predecessor_province, "."),
+      TRUE ~ note
+    )
+  ) %>%
+  select(-predecessor_vote_share, -current_value, -predecessor_province)
+
+final <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1)
+
+final_house <- final %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+
+
+# create final database for senate elections
+src <- ""
+nt <- "Senate"
+
+senDataList <- list(manual_sen_PHL_2019,
+                 manual_sen_PHL_2022,
+                 manual_sen_PHL_2025)
+
+# Helper functions defined below
+noDataYears <- createEmptyYears(senateElectionYears, philSubnational, src, nt)
+filledDataYears <- fillEmpty(senDataList, philSubnational)
+
+# Next, populate data for new provinces, if it exists
+# Step 1: Prepare DFM - treat "." as NA for vote_share_incumbent
+clean_dfm <- filledDataYears %>%
+  mutate(vote_share_incumbent = ifelse(vote_share_incumbent == ".", NA, as.numeric(vote_share_incumbent)))
+
+# Step 2: Join mapping onto dfm to annotate each row with predecessor and creation year
+annotated_dfm <- clean_dfm %>%
+  left_join(newProvinceMap, by = c("NAME_1" = "modern_province"))
+
+# Step 3: Filter for rows where:
+# - the vote share is missing
+# - the year is before the creation year
+# - the predecessor is defined
+candidates <- annotated_dfm %>%
+  filter(
+    is.na(vote_share_incumbent),
+    !is.na(predecessor_province),
+    year <= creation_year
+  )
+
+# Step 4: Look up vote share from predecessor province in same year
+predecessor_values <- clean_dfm %>%
+  select(NAME_1, year, month, vote_share_incumbent) %>%
+  rename(
+    predecessor_province = NAME_1,
+    predecessor_vote_share = vote_share_incumbent
+  )
+
+# Step 5: Join to get predecessor values
+candidates_report <- candidates %>%
+  left_join(predecessor_values, by = c("predecessor_province", "year", "month")) %>%
+  filter(!is.na(predecessor_vote_share)) %>%
+  select(
+    year,
+    month,
+    modern_province = NAME_1,
+    predecessor_province,
+    predecessor_vote_share,
+    current_value = vote_share_incumbent
+  )
+
+# candidates_report contains all cases worth reviewing for manual filling
+
+# Step 6: Update filledDataYears with values from candidates_report
+filledDataYears <- filledDataYears %>%
+  mutate(vote_share_incumbent = ifelse(vote_share_incumbent == ".", NA, as.numeric(vote_share_incumbent))) %>%
+  left_join(candidates_report, by = c("NAME_1" = "modern_province", "year", "month")) %>%
+  mutate(
+    vote_share_incumbent = coalesce(predecessor_vote_share, vote_share_incumbent),
+    note = case_when(
+      !is.na(predecessor_vote_share) & !is.na(note) ~ paste0(note, ". This result was copied from ", predecessor_province, "."),
+      !is.na(predecessor_vote_share) & is.na(note) ~ paste0("This result was copied from ", predecessor_province, "."),
+      TRUE ~ note
+    )
+  ) %>%
+  select(-predecessor_vote_share, -current_value, -predecessor_province)
+
+final <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1)
+
+final_senate <- final %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+
+
+# create final database for presidential elections
+src <- ""
+nt <- "President"
+
+presDataList <- list(manual_pres_PHL_2022)
+
+# Helper functions defined below
+noDataYears <- createEmptyYearsPres(presidentialElectionYears, philSubnational, src, nt)
+filledDataYears <- fillEmpty(presDataList, philSubnational)
+
+# Next, populate data for new provinces, if it exists
+# Step 1: Prepare DFM - treat "." as NA for vote_share_incumbent
+clean_dfm <- filledDataYears %>%
+  mutate(vote_share_incumbent = ifelse(vote_share_incumbent == ".", NA, as.numeric(vote_share_incumbent)))
+
+# Step 2: Join mapping onto dfm to annotate each row with predecessor and creation year
+annotated_dfm <- clean_dfm %>%
+  left_join(newProvinceMap, by = c("NAME_1" = "modern_province"))
+
+# Step 3: Filter for rows where:
+# - the vote share is missing
+# - the year is before the creation year
+# - the predecessor is defined
+candidates <- annotated_dfm %>%
+  filter(
+    is.na(vote_share_incumbent),
+    !is.na(predecessor_province),
+    year <= creation_year
+  )
+
+# Step 4: Look up vote share from predecessor province in same year
+predecessor_values <- clean_dfm %>%
+  select(NAME_1, year, month, vote_share_incumbent) %>%
+  rename(
+    predecessor_province = NAME_1,
+    predecessor_vote_share = vote_share_incumbent
+  )
+
+# Step 5: Join to get predecessor values
+candidates_report <- candidates %>%
+  left_join(predecessor_values, by = c("predecessor_province", "year", "month")) %>%
+  filter(!is.na(predecessor_vote_share)) %>%
+  select(
+    year,
+    month,
+    modern_province = NAME_1,
+    predecessor_province,
+    predecessor_vote_share,
+    current_value = vote_share_incumbent
+  )
+
+# candidates_report contains all cases worth reviewing for manual filling
+
+# Step 6: Update filledDataYears with values from candidates_report
+filledDataYears <- filledDataYears %>%
+  mutate(vote_share_incumbent = ifelse(vote_share_incumbent == ".", NA, as.numeric(vote_share_incumbent))) %>%
+  left_join(candidates_report, by = c("NAME_1" = "modern_province", "year", "month")) %>%
+  mutate(
+    vote_share_incumbent = coalesce(predecessor_vote_share, vote_share_incumbent),
+    note = case_when(
+      !is.na(predecessor_vote_share) & !is.na(note) ~ paste0(note, ". This result was copied from ", predecessor_province, "."),
+      !is.na(predecessor_vote_share) & is.na(note) ~ paste0("This result was copied from ", predecessor_province, "."),
+      TRUE ~ note
+    )
+  ) %>%
+  select(-predecessor_vote_share, -current_value, -predecessor_province)
+
+final <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1)
+
+final_pres <- final %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+
+
+# combine into one df
+allElections <- rbind(final_house, final_pres, final_senate) %>%
+  arrange(year, month, NAME_1)
+
+# get file
+write.xlsx(allElections, "PHL_adm1.xlsx", colnames = TRUE, rownames = FALSE)
+
+
+
+
+##############################################################
+# Helper Functions
+##############################################################
+
+
+
+
+# want to populate empty years with ".", empty province results with "." 
+# following functions populate dataframes with "." for provinces with missing
+# data, "." for years without electoral data
+
+# function that returns a dataframe for years with no workable electoral data
+createEmptyYearsPres <- function(tracker, subNames, source, note){
+  base <- data.frame()
+  
+  for (i in 1:nrow(tracker)){
+    elecBase <- data.frame()
+    
+    if (tracker[i,3] == 0){ #if the year has no data
+      thisYear <- tracker[i, 2]
+      thisMonth <- tracker[i, 1]
+      exLe <- tracker[i, 4]
+      country <- subNames[1, 1]
+      countryCode <- subNames[1, 2]
+      
+      for (j in 1:nrow(subNames)){
+        subName <- subNames[j, 3]
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = subName, year = thisYear, month = thisMonth,
+                         exe_leg = exLe, incumbent_party = ".", 
+                         vote_share_incumbent = ".", party_turnover = ".",
+                         source = src, note = nt)
+        
+        elecBase <- rbind(elecBase, df)
+        
+      }
+      
+      base <- rbind(base, elecBase)
+      
+    }
+    
+  }
+  
+  base <- base %>%
+    rename(
+      year = year,
+      month = month
+    )
+  
+  base <- base[, c("NAME_0", "GID_0", "NAME_1", "year", "month", 
+                   "exe_leg", "incumbent_party", 
+                   "vote_share_incumbent", "party_turnover", 
+                   "source", "note")]
+  return(base)
+}
+
+# function that returns a dataframe for years with no workable electoral data
+createEmptyYears <- function(tracker, subNames, source, note){
+  base <- data.frame()
+  
+  for (i in 1:nrow(tracker)){
+    elecBase <- data.frame()
+    
+    if (tracker[i,3] == 0){ #if the year has no data
+      thisYear <- tracker[i, 2]
+      thisMonth <- tracker[i, 1]
+      exLe <- tracker[i, 4]
+      country <- subNames[1, 1]
+      countryCode <- subNames[1, 2]
+      
+      for (j in 1:nrow(subNames)){
+        subName <- subNames[j, 3]
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = subName, year = thisYear, month = thisMonth,
+                         exe_leg = exLe, incumbent_party = ".", 
+                         vote_share_incumbent = ".", party_turnover = ".",
+                         source = src, note = nt)
+        
+        elecBase <- rbind(elecBase, df)
+        
+      }
+      
+      base <- rbind(base, elecBase)
+      
+    }
+    
+  }
+  
+  base <- base %>%
+    rename(
+      year = yr,
+      month = mn
+    )
+  
+  base <- base[, c("NAME_0", "GID_0", "NAME_1", "year", "month", 
+                   "exe_leg", "incumbent_party", 
+                   "vote_share_incumbent", "party_turnover", 
+                   "source", "note")]
+  return(base)
+}
+
+# function that populates missing province data with "."
+fillEmpty <- function(resultList, subNames){
+  base <- data.frame()
+  
+  for (i in 1:length(resultList)){
+    currElection <- resultList[[i]]
+    
+    # get provs that don't have a result
+    missingProvs <- setdiff(subNames$NAME_1, currElection$NAME_1)
+    
+    if (length(missingProvs) > 0){
+      thisYear <- currElection[1, 4]
+      thisMonth <- currElection[1, 5]
+      exLe <- currElection[1, 6]
+      country <- currElection[1, 1]
+      countryCode <- currElection[1, 2]
+      incumParty <- currElection[1, 7]
+      turnover <- currElection[1, 9]
+      src <- currElection[1, 10]
+      nt <- currElection[1, 11]
+      
+      for (prov in missingProvs){
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = as.character(prov), year = thisYear, month = thisMonth,
+                         exe_leg = exLe, incumbent_party = incumParty, 
+                         vote_share_incumbent = ".", party_turnover = turnover,
+                         source = src, note = nt)
+        
+        currElection <- rbind(currElection, df)
+        
+      }
+      
+    }
+    
+    base <- rbind(base, currElection)
+    
+  }
+  
+  return(base)
+  
+}

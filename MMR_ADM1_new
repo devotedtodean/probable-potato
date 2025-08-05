@@ -1,0 +1,803 @@
+##############################################################
+# Myanmar - MMR
+##############################################################
+
+setwd("D:/Kien Work/ProfSchneiderRASP25-SU25")
+rm(list = ls())
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(purrr)
+library(openxlsx)
+library(readr)
+
+##############################################################
+
+
+
+
+# CLEA
+CLEA <- load("D:/Kien Work/ProfSchneiderRASP25-SU25/clea_lc_20240419_r/clea_lc_20240419_r/clea_lc_20240419.RData")
+CLEA <- clea_lc_20240419
+rm(clea_lc_20240419)
+
+CLEA_MMR_RAW <- CLEA %>% 
+  filter (ctr_n == "Myanmar", yr >= 1987) %>%
+  select (yr, mn, ctr_n, sub, cst_n, cst, pty_n, vv1, pv1)
+
+# Handcoded data
+handData <- read_excel("MMR_rawdata.xlsx")
+
+
+
+
+##############################################################
+# Data Labeling
+##############################################################
+
+
+
+
+myanmarSubnational <- read_excel("GADM_ADM1.xlsx") %>% 
+  filter(NAME_0 == "Myanmar") %>%
+  select(NAME_0, GID_0, NAME_1, GID_1)
+
+CLEA_MMR_RAW <- CLEA_MMR_RAW %>%
+  filter(pv1 >= 0, vv1 >= 0)
+
+# Since small number of corrections, manually correct
+CLEA_MMR <- CLEA_MMR_RAW %>%
+  mutate(
+    subNat = NA
+  )
+
+# Manually correct leftovers
+for (i in 1:nrow(CLEA_MMR)){
+  if (is.na(CLEA_MMR$subNat[i])){
+    getSubName <- CLEA_MMR$sub[i]
+    
+    if (grepl("Arakan State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Rakhine"
+    }
+    else if (grepl("Ayeyarwady Region", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Ayeyarwady"
+    }
+    else if (grepl("Bago Region", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Bago"
+    }
+    else if (grepl("Chin State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Chin"
+    }
+    else if (grepl("Irrawaddy Division", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Ayeyarwady"
+    }
+    else if (grepl("Kachin State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Kachin"
+    }
+    else if (grepl("Karen State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Kayin"
+    }
+    else if (grepl("Karenni State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Kayah"
+    }
+    else if (grepl("Kayah State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Kayah"
+    }
+    else if (grepl("Kayin State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Kayin"
+    }
+    else if (grepl("Magway Region", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Magway"
+    }
+    else if (grepl("Magwe Division", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Magway"
+    }
+    else if (grepl("Mandalay Division", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Mandalay"
+    }
+    else if (grepl("Mandalay Region", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Mandalay"
+    }
+    else if (grepl("Mon State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Mon"
+    }
+    else if (grepl("Pegu Division", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Bago"
+    }
+    else if (grepl("Rakhine State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Rakhine"
+    }
+    else if (grepl("Rangoon Division", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Yangon"
+    }
+    else if (grepl("Sagaing Division", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Sagaing"
+    }
+    else if (grepl("Sagaing Region", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Sagaing"
+    }
+    else if (grepl("Shan State", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Shan"
+    }
+    else if (grepl("Tanintharyi Region", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Tanintharyi"
+    }
+    else if (grepl("Tenasserim Division", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Tanintharyi"
+    }
+    else if (grepl("Yangon Region", getSubName, ignore.case = TRUE)){
+      CLEA_MMR$subNat[i] <- "Yangon"
+    }
+    
+  }
+  
+}
+
+
+
+# Leftover cases, all captured
+leftovers <- CLEA_MMR %>%
+  filter(is.na(subNat))
+rm(leftovers)
+rm(CLEA_MMR_RAW)
+
+
+
+
+##############################################################
+# Year-by-year elections
+##############################################################
+
+
+
+
+electionYears <- CLEA_MMR %>% 
+  select(yr, mn) %>%
+  distinct() %>%
+  mutate(haveData = 0, exe_leg = "leg")
+#1987, 1997, 2002, 2012, 2017
+
+missingYearA <- data.frame(yr = 1990, mn = 5, haveData = 0, exe_leg = "leg")
+missingYearB <- data.frame(yr = 2020, mn = 11, haveData = 0, exe_leg = "leg")
+
+missingYears <- rbind(missingYearA, missingYearB)
+
+lowerElectionYears <- rbind(electionYears, missingYears) %>%
+  arrange(yr)
+
+rm(electionYears, missingYearA, missingYearB, missingYears)
+
+
+
+missingYearA <- data.frame(yr = 2010, mn = 11, haveData = 0, exe_leg = "leg")
+missingYearB <- data.frame(yr = 2015, mn = 11, haveData = 0, exe_leg = "leg")
+missingYearC <- data.frame(yr = 2020, mn = 11, haveData = 0, exe_leg = "leg")
+
+missingYears <- rbind(missingYearA, missingYearB, missingYearC)
+
+upperElectionYears <- missingYears %>%
+  arrange(yr)
+
+rm(missingYearA, missingYearB, missingYearC, missingYears)
+
+# 2020 data on wikipedia for both houses
+# Upper for 2010, 2015 on wiki
+# No data for 1990
+
+
+
+
+################################################################################
+# Lower house elections
+
+# 1990 incumbent: National Unity party, winner: "NLD"
+# Winner not allowed to form government, military coup. Lower was for a body
+# called the "Constitutional Committee" 
+
+################################################################################
+# 2010 incumbent: "USDP", winner: "USDP"
+
+# Military governed, opposition boycotted
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Union Solidarity and Development Party" # USDP
+                    ) # Old Ruling Party
+incumbentPartyName <- "Union Solidarity and Development Party (Military Party)"
+noteToAdd <- "Pyithu Hluttaw (House of Representatives)"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "MMR"
+thisYear <- 2010
+
+curr <- CLEA_MMR %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_MMR_2010 <- curr
+
+lowerElectionYears[2, 3] <- 1 # this election has data
+
+################################################################################
+# 2015 incumbent: "USDP", winner: "NLD"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("Union Solidarity and Development Party" # USDP
+                    ) # Old Ruling Party
+incumbentPartyName <- "Union Solidarity and Development Party (Military Party)"
+noteToAdd <- "Pyithu Hluttaw (House of Representatives)"
+sourceUsed <- "https://electiondataarchive.org/"
+exeOrLeg <- "leg"
+countryCode <- "MMR"
+thisYear <- 2015
+
+curr <- CLEA_MMR %>%
+  filter(yr == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(subNat, cst, .keep_all = TRUE) %>%
+  group_by(subNat) %>%
+  summarise(total_votes = sum(vv1, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(pty_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(subNat) %>%
+  summarise(total_incumbent_votes = sum(pv1, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "subNat") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "subNat")
+curr <- curr %>% 
+  rename (year = yr, month = mn, NAME_0 = ctr_n, NAME_1 = subNat, incumbent_party = pty_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+CLEA_MMR_2015 <- curr
+
+lowerElectionYears[3, 3] <- 1 # this election has data
+
+################################################################################
+# 2020 incumbent: "NLD", winner: "NLD"
+
+# Although there was no party turnover because of the results, there was a party
+# turnover because the military rejected the result. 
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("NLD" # NLD
+                    ) # Old Ruling Party
+incumbentPartyName <- "National League for Democracy (NLD)"
+noteToAdd <- "Pyithu Hluttaw (House of Representatives)"
+sourceUsed <- "https://web.archive.org/web/20210201042254/https://uecdata.s3.ap-southeast-1.amazonaws.com/2020%20Election%20Result%20%28%20Percentage%20%29/1.%20Pyithu%20Result%20%28%20Percentage%20%29/Pyithu%20Each%20Candidate%20Result.pdf"
+exeOrLeg <- "leg"
+countryCode <- "MMR"
+thisYear <- 2020
+
+curr <- handData %>%
+  filter(year == thisYear, exe_leg == "leg_horeps") %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes1 = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes1) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+horeps_MMR_2020 <- curr
+
+lowerElectionYears[4, 3] <- 1 # this election has data
+
+################################################################################
+# Upper house: 
+# 2010 incumbent: "USDP", winner: "USDP"
+
+# Military governed. Opposition boycotted the elections 
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("USDP" # USDP
+                    ) # Old Ruling Party
+incumbentPartyName <- "Union Solidarity and Development Party (USDP)"
+noteToAdd <- "Amyotha Hluttaw (House of Nationalities)"
+sourceUsed <- "source"
+countryCode <- "MMR"
+thisYear <- 2010
+
+curr <- handData %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes1 = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes1) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+hon_MMR_2010 <- curr
+
+upperElectionYears[1, 3] <- 1 # this election has data
+
+################################################################################
+# 2015 incumbent: "USDP", winner: "NLD"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("(USDP)" # USDP
+                    ) # Old Ruling Party
+incumbentPartyName <- "Union Solidarity and Development Party (USDP)"
+noteToAdd <- "Amyotha Hluttaw (House of Nationalities)"
+sourceUsed <- "https://www.mypilar.org/sites/mypilar.org/files/related-file-upload/amyotha_elections_results_uec_english_14_dec_2016.xlsx"
+countryCode <- "MMR"
+thisYear <- 2015
+
+curr <- handData %>%
+  filter(year == thisYear) %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes1 = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes1) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+hon_MMR_2015 <- curr
+
+upperElectionYears[2, 3] <- 1 # this election has data
+
+################################################################################
+# 2020 incumbent: "NLD", winner: "NLD"
+
+# Although the election itself yielded no party turnover, the military refused
+# to accept the results of the election and initiated a coup
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbentsCLEA <- c("NLD" # NLD
+                    ) # Old Ruling Party
+incumbentPartyName <- "National League for Democracy (NLD)"
+noteToAdd <- "Amyotha Hluttaw (House of Nationalities)"
+sourceUsed <- "source"
+thisYear <- 2020
+
+curr <- handData %>%
+  filter(year == thisYear, exe_leg == "leg_hon") %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes1 = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbentsCLEA, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes1) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (year = year, month = month, NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = countryCode, exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+hon_MMR_2020 <- curr
+
+upperElectionYears[3, 3] <- 1 # this election has data
+
+
+
+
+##############################################################
+# Combine electoral Results
+##############################################################
+
+
+
+
+# create final database for parliamentary elections
+src <- "Varied"
+nt <- "Constitutional Committee"
+
+dataList <- list(CLEA_MMR_2010,
+                 CLEA_MMR_2015,
+                 horeps_MMR_2020)
+
+# Helper functions defined below
+noDataYears <- createEmptyYears(lowerElectionYears, myanmarSubnational, src, nt)
+filledDataYears <- fillEmpty(dataList, myanmarSubnational) %>%
+  mutate(NAME_1 = as.character(NAME_1))
+
+finalLower <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1) %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+# create final database for presidential elections
+src <- "Varied"
+nt <- "Amyotha Hluttaw (House of Nationalities)"
+
+dataList <- list(hon_MMR_2010, 
+                 hon_MMR_2015,
+                 hon_MMR_2020)
+
+# Helper functions defined below
+noDataYears <- createEmptyYears(upperElectionYears, myanmarSubnational, src, nt)
+filledDataYears <- fillEmpty(dataList, myanmarSubnational) %>%
+  mutate(NAME_1 = as.character(NAME_1))
+
+finalUpper <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1) %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+
+# Final amalgamated database
+final <- rbind(finalLower, finalUpper) 
+
+# Add GID_1 labels
+GID_1_labels <- myanmarSubnational %>%
+  select(NAME_1, GID_1)
+
+final <- final %>%
+  left_join(GID_1_labels, by = "NAME_1") %>%
+  select(NAME_0, GID_0, NAME_1, GID_1, year, month, exe_leg, incumbent_party,
+         vote_share_incumbent, party_turnover, source, note) %>%
+  arrange(year, month, NAME_1)
+  
+
+# get file
+write.xlsx(final, "MMR_adm1_new.xlsx", colnames = TRUE, rownames = FALSE)
+
+
+
+
+##############################################################
+# Helper Functions
+##############################################################
+
+
+
+
+# want to populate empty years with ".", empty province results with "." 
+# following functions populate dataframes with "." for provinces with missing
+# data, "." for years without electoral data
+
+# function that returns a dataframe for years with no workable electoral data
+createEmptyYears <- function(tracker, subNames, source, note){
+  base <- data.frame()
+  
+  for (i in 1:nrow(tracker)){
+    elecBase <- data.frame()
+    
+    if (tracker[i,3] == 0){ #if the year has no data
+      thisYear <- as.numeric(tracker[i, 1])
+      thisMonth <- as.numeric(tracker[i, 2])
+      exLe <- as.character(tracker[i, 4])
+      country <- as.character(subNames[1, 1])
+      countryCode <- as.character(subNames[1, 2])
+      
+      
+      for (j in 1:nrow(subNames)){
+        subName <- as.character(subNames[j, 3])
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = subName, year = thisYear, month = thisMonth,
+                         exe_leg = exLe, incumbent_party = ".", 
+                         vote_share_incumbent = ".", party_turnover = ".",
+                         source = src, note = nt)
+        
+        elecBase <- rbind(elecBase, df)
+        
+      }
+      
+      base <- rbind(base, elecBase)
+      
+    }
+    
+    if (nrow(elecBase) == 0){
+      return(base)
+    }
+    
+  }
+  
+  
+  base <- base %>%
+    rename(
+      year = yr,
+      month = month
+    )
+  
+  base <- base[, c("NAME_0", "GID_0", "NAME_1", "year", "month", 
+                   "exe_leg", "incumbent_party", 
+                   "vote_share_incumbent", "party_turnover", 
+                   "source", "note")]
+  return(base)
+}
+
+# function that populates missing province data with "."
+fillEmpty <- function(resultList, subNames){
+  base <- data.frame()
+  
+  for (i in 1:length(resultList)){
+    currElection <- resultList[[i]]
+    
+    # get provs that don't have a result
+    missingProvs <- setdiff(subNames$NAME_1, currElection$NAME_1)
+    
+    if (length(missingProvs) > 0){
+      thisYear <- currElection[1, 4]
+      thisMonth <- currElection[1, 5]
+      exLe <- currElection[1, 6]
+      country <- currElection[1, 1]
+      countryCode <- currElection[1, 2]
+      incumParty <- currElection[1, 7]
+      turnover <- currElection[1, 9]
+      src <- currElection[1, 10]
+      nt <- currElection[1, 11]
+      
+      if (exLe == "exe"){
+        thisRound <- 1
+      }
+      
+      for (prov in missingProvs){
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = as.character(prov), year = thisYear, month = thisMonth,
+                         exe_leg = exLe, incumbent_party = incumParty, 
+                         vote_share_incumbent = ".", party_turnover = turnover,
+                         source = src, note = nt)
+        
+        currElection <- rbind(currElection, df)
+        
+      }
+      
+    }
+    
+    base <- rbind(base, currElection)
+    
+  }
+  
+  return(base)
+  
+}
+
+
+
+
+################################################################################
+# Code used to clean up data extracted from various sources
+
+base1 <- data.frame()
+mmr_2010_hon_data <- read_excel("myanmar_2010_preprocessing_house_of_nationalities.xlsx")
+
+for (i in 2:nrow(mmr_2010_hon_data)){
+  district <- as.character(mmr_2010_hon_data[i, 1])
+  numValid <- as.numeric(mmr_2010_hon_data[i, 41])
+  src <- "source"
+  for (j in 3:38){
+    party <- as.character(mmr_2010_hon_data[1, j])
+    party_v <- as.numeric(mmr_2010_hon_data[i, j])
+    
+    df <- data.frame(country = "myanmar",
+                     district_n = district, year = 2010, month = 11,
+                     exe_leg = "leg", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     source = src)
+    
+    base1 <- rbind(base1, df)
+    
+  }
+}
+
+base1 <- base1 %>%
+  filter(!is.na(party_votes))
+
+
+
+base2 <- data.frame()
+mmr_2015_hon_data <- read_excel("myanmar_2015_preprocessing_house_of_nationalities.xlsx", sheet = "Amyotha(Constituencies)") 
+
+mmr_2015_hon_data$total_votes <- NA
+
+numValidVotes <- 0
+
+for (i in 3:nrow(mmr_2015_hon_data)){
+  if (!is.na(mmr_2015_hon_data[i, 1])){
+    numValidVotes <- as.numeric(mmr_2015_hon_data[i, 16])
+  }
+  else{
+    mmr_2015_hon_data[i, 19] <- numValidVotes
+  }
+}
+
+for (i in 4:nrow(mmr_2015_hon_data)){
+  district <- as.character(mmr_2015_hon_data[i, 12])
+  numValid <- as.numeric(mmr_2015_hon_data$total_votes[i])
+  src <- "https://www.mypilar.org/sites/mypilar.org/files/related-file-upload/amyotha_elections_results_uec_english_14_dec_2016.xlsx"
+  
+  party <- as.character(mmr_2015_hon_data[i, 13])
+  party_v <- as.numeric(mmr_2015_hon_data[i, 14])
+  
+  df <- data.frame(country = "myanmar",
+                   district_n = district, year = 2015, month = 11,
+                   exe_leg = "leg", party_n = party, 
+                   party_votes = party_v, total_votes = numValid,
+                   source = src)
+  
+  base2 <- rbind(base2, df)
+  
+}
+
+
+base2 <- base2 %>%
+  filter(!is.na(party_n)) 
+
+
+
+base3 <- data.frame()
+mmr_2020_hon_data <- read_excel("myanmar_2020_preprocessing_house_of_nationalities.xlsx") 
+
+for (i in 2:nrow(mmr_2020_hon_data)){
+  district <- as.character(mmr_2020_hon_data[i, 1])
+  numValid <- as.numeric(mmr_2020_hon_data[i, 61])
+  src <- "https://web.archive.org/web/20210201042320/https://uecdata.s3.ap-southeast-1.amazonaws.com/2020%20Election%20Result%20%28%20Percentage%20%29/2.%20Amyotha%20Result%20%28%20Percentage%20%29/Amyotha%20Each%20Candidate%20Result.pdf"
+  
+  for (j in 3:58){
+    party <- as.character(mmr_2020_hon_data[1, j])
+    party_v <- as.numeric(mmr_2020_hon_data[i, j])
+    
+    df <- data.frame(country = "myanmar",
+                     district_n = district, year = 2020, month = 11,
+                     exe_leg = "leg_hon", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     source = src)
+    
+    base3 <- rbind(base3, df)
+    
+  }
+  
+}
+
+
+base3 <- base3 %>%
+  filter(!is.na(party_votes))
+
+
+
+base4 <- data.frame()
+mmr_2020_horeps_data <- read_excel("myanmar_2020_preprocessing_house_of_representatives.xlsx") 
+
+for (i in 2:nrow(mmr_2020_horeps_data)){
+  district <- as.character(mmr_2020_horeps_data[i, 1])
+  numValid <- as.numeric(mmr_2020_horeps_data[i, 83])
+  src <- "https://web.archive.org/web/20210201042254/https://uecdata.s3.ap-southeast-1.amazonaws.com/2020%20Election%20Result%20%28%20Percentage%20%29/1.%20Pyithu%20Result%20%28%20Percentage%20%29/Pyithu%20Each%20Candidate%20Result.pdf"
+  
+  for (j in 3:80){
+    party <- as.character(mmr_2020_horeps_data[1, j])
+    party_v <- as.numeric(mmr_2020_horeps_data[i, j])
+    
+    df <- data.frame(country = "myanmar",
+                     district_n = district, year = 2020, month = 11,
+                     exe_leg = "leg_horeps", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     source = src)
+    
+    base4 <- rbind(base4, df)
+    
+  }
+  
+}
+
+
+base4 <- base4 %>%
+  filter(!is.na(party_votes))
+
+# combine into one file
+alldata <- rbind(base1, base2, base3, base4) %>%
+  arrange(year, month, district_n) %>%
+  mutate(
+    country = "Myanmar",
+    district_n = str_to_title(district_n)
+  ) 
+write.xlsx(alldata, "MMR_rawdata.xlsx", colnames = TRUE, rownames = FALSE)

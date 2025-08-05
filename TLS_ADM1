@@ -1,0 +1,920 @@
+##############################################################
+# Timor-Leste - TLS
+##############################################################
+
+setwd("D:/Kien Work/ProfSchneiderRASP25-SU25")
+rm(list = ls())
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(purrr)
+library(openxlsx)
+
+##############################################################
+
+
+
+
+# CLEA has Timor Leste election results, but only nationally. All data used for 
+# Timor Leste has been manually compiled by me. 
+
+# Sources
+
+# 2002 president: adam carr
+# 2001 parliament: adam carr
+# 2007 president: wiki
+# 2007 parliament: wiki
+# 2012 president: 
+# 2012 parliament: election passport
+# 2017 president: 
+# 2017 parliament: cne wayback machine
+# 2018 parliament: cne wayback machine
+# 2022 president: cne wayback machine
+# 2023 parliament: 
+
+timorData <- read_excel("TLS_rawdata.xlsx")
+
+
+
+
+##############################################################
+# Data Labeling
+##############################################################
+
+
+
+
+timorSubnational <- read_excel("GADM_ADM1.xlsx") %>% 
+  filter(NAME_0 == "Timor-Leste") %>%
+  select(NAME_0, GID_0, NAME_1)
+
+table(timorData$district_n)
+table(timorSubnational$NAME_1)
+
+# Data is labeled correctly
+
+
+##############################################################
+# Year-by-year elections
+##############################################################
+
+
+
+
+# Presidential elections
+# 2002, 2007 (2 rounds), 2012 (2 rounds), 2017, 2022 (2 rounds)
+
+elecYearA <- data.frame(yr = 2002, mn = 4, haveData = 0, exe_leg = "exe")
+elecYearB <- data.frame(yr = 2007, mn = 4, haveData = 0, exe_leg = "exe")
+elecYearC <- data.frame(yr = 2007, mn = 5, haveData = 0, exe_leg = "exe")
+elecYearD <- data.frame(yr = 2012, mn = 3, haveData = 0, exe_leg = "exe")
+elecYearE <- data.frame(yr = 2012, mn = 4, haveData = 0, exe_leg = "exe")
+elecYearF <- data.frame(yr = 2017, mn = 3, haveData = 0, exe_leg = "exe")
+elecYearG <- data.frame(yr = 2022, mn = 3, haveData = 0, exe_leg = "exe")
+elecYearH <- data.frame(yr = 2022, mn = 4, haveData = 0, exe_leg = "exe")
+
+presidentialElectionYears <- rbind(elecYearA, elecYearB, elecYearC, elecYearD, 
+                                   elecYearE, elecYearF, elecYearG, elecYearH) %>%
+  arrange(yr)
+
+rm(elecYearA, elecYearB, elecYearC, elecYearD, elecYearE, elecYearF, elecYearG, 
+   elecYearH)
+
+# Parliamentary elections
+# 2001, 2007, 2012, 2017, 2018, 2023
+
+elecYearA <- data.frame(yr = 2001, mn = 8, haveData = 0, exe_leg = "leg")
+elecYearB <- data.frame(yr = 2007, mn = 6, haveData = 0, exe_leg = "leg")
+elecYearC <- data.frame(yr = 2012, mn = 7, haveData = 0, exe_leg = "leg")
+elecYearD <- data.frame(yr = 2017, mn = 7, haveData = 0, exe_leg = "leg")
+elecYearE <- data.frame(yr = 2018, mn = 5, haveData = 0, exe_leg = "leg")
+elecYearF <- data.frame(yr = 2023, mn = 5, haveData = 0, exe_leg = "leg")
+
+parliamentaryElectionYears <- rbind(elecYearA, elecYearB, elecYearC, elecYearD, 
+                                   elecYearE, elecYearF) %>% arrange(yr)
+
+rm(elecYearA, elecYearB, elecYearC, elecYearD, elecYearE, elecYearF)
+
+
+
+
+################################################################################
+# 2001 Parliamentary incumbent: "", winner: "Fretilin"
+# Note: these are the first parliamentary elections held in Timor Leste. While
+# election data exists, code this year as missing data since there is no
+# incumbent. 
+
+################################################################################
+#2002 Presidential incumbent: "", winner: "Independent"
+# Note: these are the first presidential elections held in Timor Leste. While
+# election data exists, code this year as missing data since there is no
+# incumbent. 
+
+################################################################################
+# 2007 Parliamentary incumbent: "Fretilin", winner: "CNRT Coalition"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Fretilin" # Fretilin
+                ) # Old Coalition Members
+incumbentPartyName <- "Fretilin"
+noteToAdd <- "Parliamentary"
+sourceUsed <- "https://en.wikipedia.org/wiki/2007_East_Timorese_parliamentary_election"
+exeOrLeg <- "leg"
+countryCode <- "TLS"
+thisYear <- 2007
+thisRound <- 0
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "leg")
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2007_parliamentary <- curr
+
+parliamentaryElectionYears[2, 3] <- 1 # this election has data
+
+################################################################################
+# 2007 Presidential incumbent: "Independent", winner: "José Ramos-Horta (Independent)"
+# Note: no turnover because although independent, was politically engaged with
+# the incumbent president. Also, there were two election rounds
+
+# Round 1 
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Independent" # Only independent is Ramos-Horta
+              ) 
+incumbentPartyName <- "José Ramos-Horta (Independent)"
+noteToAdd <- "Presidential"
+sourceUsed <- "https://en.wikipedia.org/wiki/2007_East_Timorese_presidential_election"
+exeOrLeg <- "exe"
+countryCode <- "TLS"
+thisYear <- 2007
+thisRound <- 1
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "exe", round == thisRound)
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2007_presidential_round1 <- curr
+
+presidentialElectionYears[2, 3] <- 1 # this election has data
+
+
+# Round 2 
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Independent" # Only independent is Ramos-Horta
+                ) 
+incumbentPartyName <- "José Ramos-Horta (Independent)"
+noteToAdd <- "Presidential"
+sourceUsed <- "https://en.wikipedia.org/wiki/2007_East_Timorese_presidential_election"
+exeOrLeg <- "exe"
+countryCode <- "TLS"
+thisYear <- 2007
+thisRound <- 2
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "exe", round == thisRound)
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2007_presidential_round2 <- curr
+
+presidentialElectionYears[3, 3] <- 1 # this election has data
+
+################################################################################
+# 2012 Parliamentary incumbent: "CNRT Coalition", winner: "CNRT Coalition"
+
+wasTurnover <- 0 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("CNRT", # CNRT
+                "ASDT", # Part of ASDT-PSD coalition
+                "PSD", # Part of ASDT-PSD coalition
+                "PD" # Democratic Party
+                ) # Old Coalition Members
+incumbentPartyName <- "CNRT Coalition"
+noteToAdd <- "Parliamentary"
+sourceUsed <- "https://www.electionpassport.com/"
+exeOrLeg <- "leg"
+countryCode <- "TLS"
+thisYear <- 2012
+thisRound <- 0
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "leg") %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2012_parliamentary <- curr
+
+parliamentaryElectionYears[3, 3] <- 1 # this election has data
+
+################################################################################
+# 2012 Presidential incumbent: "José Ramos-Horta (Independent)", winner: "Taur Matan Ruak (Independent)"
+# There were two election rounds
+
+# Missing data
+
+################################################################################
+# 2017 Parliamentary incumbent: "CNRT Coalition", winner: "Fretilin Coalition (Fretilin, PD)"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("CNRT", # CNRT
+                "FRENTI-MUDANÇA", # FRENTI-MUDANÇA
+                "PD" # Democratic Party
+                ) # Old Coalition Members
+incumbentPartyName <- "CNRT Coalition"
+noteToAdd <- "Parliamentary"
+sourceUsed <- "https://web.archive.org/web/20210819034808/http://www.cne.tl/apuramento.2017/public.php"
+exeOrLeg <- "leg"
+countryCode <- "TLS"
+thisYear <- 2017
+thisRound <- 0
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "leg") %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2017_parliamentary <- curr
+
+parliamentaryElectionYears[4, 3] <- 1 # this election has data
+
+################################################################################
+# 2017 Presidential incumbent: "Taur Matan Ruak (Independent)", winner: "Fretilin"
+
+# Missing data
+
+################################################################################
+# 2018 Parliamentary incumbent: "Fretilin Coalition (Fretilin, PD)", winner: "AMP Coalition"
+
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Fretilin", # Fretilin
+                "PD" # Democratic Party
+                ) # Old Coalition Members
+incumbentPartyName <- "Fretilin Coalition"
+noteToAdd <- "Parliamentary"
+sourceUsed <- "https://web.archive.org/web/20190609152235/http://www.cne.tl/apuramento.2018/public.php"
+exeOrLeg <- "leg"
+countryCode <- "TLS"
+thisYear <- 2018
+thisRound <- 0
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "leg") %>%
+  distinct()
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2018_parliamentary <- curr
+
+parliamentaryElectionYears[5, 3] <- 1 # this election has data
+
+################################################################################
+# 2022 Presidential incumbent: "Fretilin", winner: "CNRT"
+# Two rounds
+
+# Round 1 
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Fretilin" # Fretilin
+                ) 
+incumbentPartyName <- "Fretilin"
+noteToAdd <- "Presidential"
+sourceUsed <- "https://web.archive.org/web/20220415013039/https://www.cne.tl/apuramento/public.php"
+exeOrLeg <- "exe"
+countryCode <- "TLS"
+thisYear <- 2022
+thisRound <- 1
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "exe", round == thisRound)
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2022_presidential_round1 <- curr
+
+presidentialElectionYears[7, 3] <- 1 # this election has data
+
+
+# Round 2 
+wasTurnover <- 1 # Was there party turnover? 1 is yes and 0 is no
+incumbents <- c("Fretilin" # Fretilin
+                ) 
+incumbentPartyName <- "Fretilin"
+noteToAdd <- "Presidential"
+sourceUsed <- "https://web.archive.org/web/20220415013039/https://www.cne.tl/apuramento/public.php"
+exeOrLeg <- "exe"
+countryCode <- "TLS"
+thisYear <- 2022
+thisRound <- 2
+
+curr <- timorData %>%
+  filter(year == thisYear, exe_leg == "exe", round == thisRound)
+
+# Step 1: total_votes (sum vv1 once per cst in subNat)
+vv1_unique <- curr %>%
+  distinct(district_n, total_votes, .keep_all = TRUE) %>%
+  group_by(district_n) %>%
+  summarise(total_votes = sum(total_votes, na.rm = TRUE))
+
+# Now track only incumbent party results
+curr <- curr %>%
+  filter(Reduce(`|`, lapply(incumbents, function(x) str_detect(party_n, regex(x, ignore_case = TRUE))))) %>%
+  distinct()
+
+# Step 2: total_incumbent_votes (sum pv1 normally)
+pv1_total <- curr %>%
+  group_by(district_n) %>%
+  summarise(total_incumbent_votes = sum(party_votes, na.rm = TRUE))
+
+# Step 3: Join and compute vote share
+x_SUB <- left_join(vv1_unique, pv1_total, by = "district_n") %>%
+  mutate(vote_share_incumbent = (total_incumbent_votes / total_votes) * 100)
+
+curr <- curr %>% left_join(x_SUB, by = "district_n")
+curr <- curr %>% 
+  rename (NAME_0 = country, NAME_1 = district_n, incumbent_party = party_n) %>%
+  mutate (GID_0 = "TLS", exe_leg = exeOrLeg, party_turnover = wasTurnover, note = noteToAdd, source = sourceUsed, round = thisRound) %>%
+  select (NAME_0, GID_0, NAME_1, year, month, exe_leg, round, incumbent_party, vote_share_incumbent, party_turnover, source, note)
+curr$incumbent_party <- incumbentPartyName
+curr <- curr %>%  distinct()
+TLS_2022_presidential_round2 <- curr
+
+presidentialElectionYears[8, 3] <- 1 # this election has data
+
+################################################################################
+# 2023 Parliamentary incumbent: "Fretilin Coalition", winner: "CNRT Coalition"
+
+# Missing data
+
+
+
+
+##############################################################
+# Combine electoral Results
+##############################################################
+
+
+
+
+# create final database for parliamentary elections
+src <- "Varied"
+nt <- "Parliamentary"
+
+dataList <- list(TLS_2007_parliamentary,
+                 TLS_2012_parliamentary,
+                 TLS_2017_parliamentary,
+                 TLS_2018_parliamentary)
+
+# Helper functions defined below
+noDataYears <- createEmptyYears(parliamentaryElectionYears, timorSubnational, src, nt)
+filledDataYears <- fillEmpty(dataList, timorSubnational) %>%
+  mutate(NAME_1 = as.character(NAME_1))
+
+finalParliamentary <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1) %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+# create final database for presidential elections
+src <- "Varied"
+nt <- "Presidential"
+
+dataList <- list(TLS_2007_presidential_round1, 
+                 TLS_2007_presidential_round2,
+                 TLS_2022_presidential_round1,
+                 TLS_2022_presidential_round2)
+
+# Helper functions defined below
+noDataYears <- createEmptyYears(presidentialElectionYears, timorSubnational, src, nt)
+filledDataYears <- fillEmpty(dataList, timorSubnational) %>%
+  mutate(NAME_1 = as.character(NAME_1))
+
+# Manually change round to 2 for year = 2012, month = 4, in noDataYears
+
+for (i in 1:nrow(noDataYears)){
+  if((as.numeric(noDataYears[i, 4]) == 2012) && (as.numeric(noDataYears[i, 5] == 4))){
+    noDataYears[i, 7] <- 2
+  }
+}
+
+finalPresidential <- rbind(filledDataYears, noDataYears) %>%
+  arrange(year, month, NAME_1) %>%
+  mutate(vote_share_incumbent = ifelse(is.na(vote_share_incumbent), ".", as.character(vote_share_incumbent)))
+
+
+
+# Manually append note about 2001/2002 being very first elections. 
+
+parliamentaryFirstElection <- "Constituent Assembly. Timor Leste's first parliamentary
+elections, so no incumbent party."
+presidentialFirstElection <- "Presidential. Timor Leste's first presidential
+elections, so no incumbent party."
+
+finalParliamentary <- finalParliamentary %>%
+  mutate(
+    note = ifelse(year == 2001, parliamentaryFirstElection, note),
+    source = ifelse(year == 2001, "http://psephos.adam-carr.net/countries/e/easttimor/easttimor20022.txt",
+                    source)
+  )
+
+finalPresidential <- finalPresidential %>%
+  mutate(
+    note = ifelse(year == 2002, presidentialFirstElection, note),
+    source = ifelse(year == 2002, "http://psephos.adam-carr.net/countries/e/easttimor/easttimor2002.txt",
+                    source)
+  )
+
+
+# Final amalgamated database
+final <- rbind(finalParliamentary, finalPresidential) %>%
+  arrange(year, month, NAME_1)
+
+# get file
+write.xlsx(final, "TLS_adm1.xlsx", colnames = TRUE, rownames = FALSE)
+
+
+
+
+##############################################################
+# Helper Functions
+##############################################################
+
+
+
+
+# want to populate empty years with ".", empty province results with "." 
+# following functions populate dataframes with "." for provinces with missing
+# data, "." for years without electoral data
+
+# function that returns a dataframe for years with no workable electoral data
+createEmptyYears <- function(tracker, subNames, source, note){
+  base <- data.frame()
+  
+  for (i in 1:nrow(tracker)){
+    elecBase <- data.frame()
+    
+    if (tracker[i,3] == 0){ #if the year has no data
+      thisYear <- tracker[i, 1]
+      thisMonth <- tracker[i, 2]
+      exLe <- tracker[i, 4]
+      country <- subNames[1, 1]
+      countryCode <- subNames[1, 2]
+      thisRound <- 0
+      
+      if (exLe == "exe"){
+        thisRound <- 1
+      }
+      
+      for (j in 1:nrow(subNames)){
+        subName <- subNames[j, 3]
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = subName, year = thisYear, month = thisMonth,
+                         exe_leg = exLe, round = thisRound, incumbent_party = ".", 
+                         vote_share_incumbent = ".", party_turnover = ".",
+                         source = src, note = nt)
+        
+        elecBase <- rbind(elecBase, df)
+        
+      }
+      
+      base <- rbind(base, elecBase)
+      
+    }
+    
+  }
+  
+  base <- base %>%
+    rename(
+      year = year,
+      month = month
+    )
+  
+  base <- base[, c("NAME_0", "GID_0", "NAME_1", "year", "month", 
+                   "exe_leg", "round", "incumbent_party", 
+                   "vote_share_incumbent", "party_turnover", 
+                   "source", "note")]
+  return(base)
+}
+
+# function that populates missing province data with "."
+fillEmpty <- function(resultList, subNames){
+  base <- data.frame()
+  
+  for (i in 1:length(resultList)){
+    currElection <- resultList[[i]]
+    
+    # get provs that don't have a result
+    missingProvs <- setdiff(subNames$NAME_1, currElection$NAME_1)
+    
+    if (length(missingProvs) > 0){
+      thisYear <- currElection[1, 4]
+      thisMonth <- currElection[1, 5]
+      exLe <- currElection[1, 6]
+      country <- currElection[1, 1]
+      countryCode <- currElection[1, 2]
+      incumParty <- currElection[1, 7]
+      turnover <- currElection[1, 9]
+      src <- currElection[1, 10]
+      nt <- currElection[1, 11]
+      round <- 0
+      
+      if (exLe == "exe"){
+        thisRound <- 1
+      }
+      
+      for (prov in missingProvs){
+        df <- data.frame(NAME_0 = country, GID_0 = countryCode,
+                         NAME_1 = as.character(prov), year = thisYear, month = thisMonth,
+                         exe_leg = exLe, round = thisRound, incumbent_party = incumParty, 
+                         vote_share_incumbent = ".", party_turnover = turnover,
+                         source = src, note = nt)
+        
+        currElection <- rbind(currElection, df)
+        
+      }
+      
+    }
+    
+    base <- rbind(base, currElection)
+    
+  }
+  
+  return(base)
+  
+}
+
+
+
+
+################################################################################
+# Code used to clean up data extracted from various sources
+
+# format 2012 data
+base1 <- data.frame()
+ep2012data <- read_excel("TL(2).xlsx")
+
+for (i in 2:nrow(ep2012data)){
+  district <- as.character(ep2012data[i, 2])
+  numValid <- as.numeric(ep2012data[i, 3])
+  src <- "https://www.electionpassport.com/"
+  
+  for (j in 4:25){
+    party <- as.character(ep2012data[1, j])
+    party_v <- as.numeric(ep2012data[i, j])
+    
+    df <- data.frame(country = "timor leste",
+                     district_n = district, year = 2012, month = 7,
+                     exe_leg = "leg", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     round = 0, source = src)
+    
+    base1 <- rbind(base1, df)
+    
+  }
+}
+
+
+
+# format 2007 parliament data
+base2 <- data.frame()
+wiki2007data <- read_excel("timor_2007_preprocessing_parliamentary_elections.xlsx")
+
+for (i in 2:nrow(wiki2007data)){
+  district <- as.character(wiki2007data[i, 1])
+  numValid <- as.numeric(wiki2007data[i, 16])
+  src <- "https://en.wikipedia.org/wiki/2007_East_Timorese_parliamentary_election"
+  
+  for (j in 2:15){
+    party <- as.character(wiki2007data[1, j])
+    party_v <- as.numeric(wiki2007data[i, j])
+    
+    df <- data.frame(country = "timor leste",
+                     district_n = district, year = 2007, month = 6,
+                     exe_leg = "leg", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     round = 0, source = src)
+    
+    base2 <- rbind(base2, df)
+    
+  }
+}
+
+
+
+# format 2017 data
+base3 <- data.frame()
+cne2017parldata <- read_excel("timor_2017_preprocessing_parliamentary_elections.xlsx")
+
+for (i in 2:nrow(cne2017parldata)){
+  district <- as.character(cne2017parldata[i, 1])
+  numValid <- as.numeric(cne2017parldata[i, 23])
+  src <- "https://web.archive.org/web/20210819034808/http://www.cne.tl/apuramento.2017/public.php"
+  
+  for (j in 2:22){
+    party <- as.character(cne2017parldata[1, j])
+    party_v <- as.numeric(cne2017parldata[i, j])
+    
+    df <- data.frame(country = "timor leste",
+                     district_n = district, year = 2017, month = 7,
+                     exe_leg = "leg", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     round = 0, source = src)
+    
+    base3 <- rbind(base3, df)
+    
+  }
+}
+
+
+
+# format 2018 data
+base4 <- data.frame()
+cne2018parldata <- read_excel("timor_2018_preprocessing_parliamentary_elections.xlsx")
+
+for (i in 2:nrow(cne2018parldata)){
+  district <- as.character(cne2018parldata[i, 1])
+  numValid <- as.numeric(cne2018parldata[i, 10])
+  src <- "https://web.archive.org/web/20190609152235/http://www.cne.tl/apuramento.2018/public.php"
+  
+  for (j in 2:9){
+    party <- as.character(cne2018parldata[1, j])
+    party_v <- as.numeric(cne2018parldata[i, j])
+    
+    df <- data.frame(country = "timor leste",
+                     district_n = district, year = 2018, month = 5,
+                     exe_leg = "leg", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     round = 0, source = src)
+    
+    base4 <- rbind(base4, df)
+    
+  }
+}
+
+
+
+# format 2022 data
+base5 <- data.frame()
+cne2022presr1data <- read_excel("timor_2022_preprocessing_presidential_elections_round1.xlsx")
+
+for (i in 2:nrow(cne2022presr1data)){
+  district <- as.character(cne2022presr1data[i, 1])
+  numValid <- as.numeric(cne2022presr1data[i, 18])
+  src <- "https://web.archive.org/web/20220415013039/https://www.cne.tl/apuramento/public.php"
+  
+  for (j in 2:17){
+    party <- as.character(cne2022presr1data[1, j])
+    party_v <- as.numeric(cne2022presr1data[i, j])
+    
+    df <- data.frame(country = "timor leste",
+                     district_n = district, year = 2022, month = 3,
+                     exe_leg = "exe", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     round = 1, source = src)
+    
+    base5 <- rbind(base5, df)
+    
+  }
+}
+
+
+
+base6 <- data.frame()
+cne2022presr2data <- read_excel("timor_2022_preprocessing_presidential_elections_round2.xlsx")
+
+for (i in 2:nrow(cne2022presr2data)){
+  district <- as.character(cne2022presr2data[i, 1])
+  numValid <- as.numeric(cne2022presr2data[i, 4])
+  src <- "https://web.archive.org/web/20220606192437/https://www.cne.tl/apuramento2022r2/public.php"
+  
+  for (j in 2:3){
+    party <- as.character(cne2022presr2data[1, j])
+    party_v <- as.numeric(cne2022presr2data[i, j])
+    
+    df <- data.frame(country = "timor leste",
+                     district_n = district, year = 2022, month = 4,
+                     exe_leg = "exe", party_n = party, 
+                     party_votes = party_v, total_votes = numValid,
+                     round = 2, source = src)
+    
+    base6 <- rbind(base6, df)
+    
+  }
+}
+
+
+
+# format 2001/2002 data
+base7 <- read_excel("timor_2001_-_2002_parliamentary_presidential_elections.xlsx") %>%
+  mutate(
+    round = ifelse(exe_leg == "exe", 1, 0),
+    district_n = str_to_title(province),
+    party_n = party
+  ) %>%
+  select(country, district_n, year, month, exe_leg, party_n, party_votes, total_votes, round, source)
+
+
+
+# format 2007 presidential data
+base8 <- read_excel("timor_2007_presidential_elections.xlsx") %>%
+  mutate(
+    district_n = str_to_title(district),
+    party_n = party,
+    
+  ) %>%
+  select(country, district_n, year, month, exe_leg, party_n, party_votes, total_votes, round, source)
+
+
+
+# combine into one file
+alldata <- rbind(base1, base2, base3, base4, base5, base6, base7, base8) %>%
+  arrange(year, month, district_n) %>%
+  mutate(
+    country = "Timor Leste",
+    district_n = str_to_title(district_n)
+  ) %>%
+  mutate(
+    district_n = ifelse(district_n == "Lautem", "Lautém", district_n)
+  ) %>%
+  mutate(
+    district_n = ifelse(district_n == "Liquica", "Liquiçá", district_n)
+  )
+write.xlsx(alldata, "TLS_rawdata.xlsx", colnames = TRUE, rownames = FALSE)
